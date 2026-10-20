@@ -1,3 +1,19 @@
+# Python 暫存
+__pycache__/
+*.py[cod]
+
+# 本地暫存圖片與金鑰
+temp_images/
+credentials.json
+.env
+
+# 虛擬環境
+venv/
+.venv/
+
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
