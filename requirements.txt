@@ -7,4 +7,3 @@ google-auth-httplib2
 pillow
 pynacl
 requests
-traceback
