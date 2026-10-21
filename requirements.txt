@@ -7,3 +7,4 @@ google-auth-httplib2
 pillow
 pynacl
 requests
+python-dotenv

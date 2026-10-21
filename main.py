@@ -114,33 +114,28 @@ def process_image_interaction(interaction_token: str, user_id: str, keyword: str
     local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
 
     try:
-        print(f"🔍 開始在 Google 雲端硬碟搜尋檔案: {file_name}")
+        # 1. 尋找檔案
         file_id = find_image_in_drive(file_name)
 
         if file_id:
-            print(f"✅ 找到檔案！File ID: {file_id}，準備下載...")
             download_image_from_drive(file_id, local_path)
             content = f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
             
             with open(local_path, "rb") as f:
                 files = {"file": (file_name, f, "image/png")}
                 payload = {"content": content}
-                response = requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
-                print(f"📤 Discord 回傳結果: {response.status_code}, {response.text}")
+                requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
         else:
-            print(f"❌ 雲端硬碟找不到檔案: {file_name}")
+            # 找不到檔案時，主動回傳提示，解除「思考中」狀態
             payload = {"content": f"❌ 抱歉，雲端硬碟中找不到檔名為 `{file_name}` 的圖片。"}
-            response = requests.post(followup_url, json=payload)
-            print(f"📤 Discord 錯誤回傳結果: {response.status_code}, {response.text}")
+            requests.post(followup_url, json=payload)
 
     except Exception as e:
-        print(f"❌ 背景任務執行時發生嚴重錯誤: {e}")
-        traceback.print_exc() # 印出詳細錯誤堆疊
-        try:
-            error_payload = {"content": f"❌ 處理圖片時發生內部錯誤：`{str(e)}`"}
-            requests.post(followup_url, json=error_payload)
-        except Exception as post_err:
-            print(f"❌ 無法發送錯誤訊息至 Discord: {post_err}")
+        # 發生任何例外錯誤時，把錯誤傳回 Discord，避免無限卡住
+        print(f"❌ 發生錯誤: {e}")
+        traceback.print_exc()
+        error_payload = {"content": f"❌ 處理圖片時發生內部錯誤：`{str(e)}`"}
+        requests.post(followup_url, json=error_payload)
 
 
 # ================= 4. FastAPI 路由設定 =================
