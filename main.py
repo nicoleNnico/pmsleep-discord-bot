@@ -93,12 +93,12 @@ def download_image_from_drive(file_id: str, local_path: str):
     while not done:
         _, done = downloader.next_chunk()
 
-def upload_image_to_drive(local_path: str, file_name: str):
-    """上傳本地圖片到 Google Drive"""
-    file_metadata = {'name': file_name, 'parents': [GDRIVE_FOLDER_ID]}
-    media = MediaFileUpload(local_path, mimetype='image/png')
-    file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
+# def upload_image_to_drive(local_path: str, file_name: str):
+#     """上傳本地圖片到 Google Drive"""
+#     file_metadata = {'name': file_name, 'parents': [GDRIVE_FOLDER_ID]}
+#     media = MediaFileUpload(local_path, mimetype='image/png')
+#     file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+#     return file.get('id')
 
 # ================= 3. 背景非同步處理任務 =================
 def process_image_interaction(interaction_token: str, user_id: str, keyword: str):
@@ -114,26 +114,34 @@ def process_image_interaction(interaction_token: str, user_id: str, keyword: str
     local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
 
     try:
-        # 尋找雲端硬碟中的圖片
+        print(f"🔍 開始在 Google 雲端硬碟搜尋檔案: {file_name}")
         file_id = find_image_in_drive(file_name)
 
         if file_id:
+            print(f"✅ 找到檔案！File ID: {file_id}，準備下載...")
             download_image_from_drive(file_id, local_path)
-            content = "" # f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
+            content = f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
             
-            # 找到圖片才發送帶有附件的回覆
             with open(local_path, "rb") as f:
                 files = {"file": (file_name, f, "image/png")}
                 payload = {"content": content}
-                requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
+                response = requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
+                print(f"📤 Discord 回傳結果: {response.status_code}, {response.text}")
         else:
-            # 雲端硬碟找不到時的提示訊息
-            payload = {"content": f"❌ 抱歉，雲端硬碟中找不到關鍵字為「{keyword}」（檔名：`{file_name}.png`）的圖片。"}
-            requests.post(followup_url, json=payload)
+            print(f"❌ 雲端硬碟找不到檔案: {file_name}")
+            payload = {"content": f"❌ 抱歉，雲端硬碟中找不到檔名為 `{file_name}` 的圖片。"}
+            response = requests.post(followup_url, json=payload)
+            print(f"📤 Discord 錯誤回傳結果: {response.status_code}, {response.text}")
 
     except Exception as e:
-        error_payload = {"content": f"❌ 尋找圖片時發生錯誤：`{str(e)}`"}
-        requests.post(followup_url, json=error_payload)
+        print(f"❌ 背景任務執行時發生嚴重錯誤: {e}")
+        traceback.print_exc() # 印出詳細錯誤堆疊
+        try:
+            error_payload = {"content": f"❌ 處理圖片時發生內部錯誤：`{str(e)}`"}
+            requests.post(followup_url, json=error_payload)
+        except Exception as post_err:
+            print(f"❌ 無法發送錯誤訊息至 Discord: {post_err}")
+
 
 # ================= 4. FastAPI 路由設定 =================
 @app.get("/")
