@@ -4,9 +4,9 @@ import json
 import requests
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from google import genai
-from google.genai import types
-from PIL import Image as PILImage
+# from google import genai
+# from google.genai import types
+# from PIL import Image as PILImage
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -17,10 +17,10 @@ import traceback
 app = FastAPI()
 
 # ================= 1. 環境變數讀取 =================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_PUBLIC_KEY = os.environ.get("DISCORD_PUBLIC_KEY")
 DISCORD_APP_ID = os.environ.get("DISCORD_APP_ID")
-FOLDER_ID = os.environ.get("FOLDER_ID")
+GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
 CREDENTIALS_JSON_CONTENT = os.environ.get("CREDENTIALS_JSON_CONTENT")
 
 # 動態還原 credentials.json (供 Google API 使用)
@@ -35,7 +35,7 @@ creds = service_account.Credentials.from_service_account_file(CREDENTIALS_FILE, 
 drive_service = build('drive', 'v3', credentials=creds)
 
 # 初始化 Gemini Client
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+# gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 LOCAL_TEMP_DIR = "./temp_images"
 os.makedirs(LOCAL_TEMP_DIR, exist_ok=True)
@@ -79,7 +79,7 @@ def verify_discord_signature(request_body: bytes, signature: str, timestamp: str
 
 def find_image_in_drive(file_name: str):
     """在指定的 Google Drive 資料夾搜尋檔案"""
-    query = f"'{FOLDER_ID}' in parents and name = '{file_name}' and trashed = false"
+    query = f"'{GDRIVE_FOLDER_ID}' in parents and name = '{file_name}' and trashed = false"
     results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     files = results.get('files', [])
     return files[0]['id'] if files else None
@@ -95,14 +95,18 @@ def download_image_from_drive(file_id: str, local_path: str):
 
 def upload_image_to_drive(local_path: str, file_name: str):
     """上傳本地圖片到 Google Drive"""
-    file_metadata = {'name': file_name, 'parents': [FOLDER_ID]}
+    file_metadata = {'name': file_name, 'parents': [GDRIVE_FOLDER_ID]}
     media = MediaFileUpload(local_path, mimetype='image/png')
     file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     return file.get('id')
 
 # ================= 3. 背景非同步處理任務 =================
 def process_image_interaction(interaction_token: str, user_id: str, keyword: str):
-    """背景執行：找圖 / 產圖 ➜ 上傳 ➜ Followup 回傳給 Discord"""
+    """
+    到 Google 雲端硬碟尋找對應的 .png 圖片。
+    如果找到：直接下載並回傳給使用者。
+    如果找不到：直接回報雲端硬碟沒有該圖片，不會再進行額外生圖。
+    """
     followup_url = f"https://discord.com/api/v10/webhooks/{DISCORD_APP_ID}/{interaction_token}"
     
     safe_filename = "".join([c for c in keyword if c.isalnum() or c.isspace()]).strip().replace(" ", "_")
@@ -110,40 +114,25 @@ def process_image_interaction(interaction_token: str, user_id: str, keyword: str
     local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
 
     try:
-        # 1. 檢查 Google 雲端硬碟
+        # 尋找雲端硬碟中的圖片
         file_id = find_image_in_drive(file_name)
 
         if file_id:
             download_image_from_drive(file_id, local_path)
-            content = f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
+            content = "" # f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
+            
+            # 找到圖片才發送帶有附件的回覆
+            with open(local_path, "rb") as f:
+                files = {"file": (file_name, f, "image/png")}
+                payload = {"content": content}
+                requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
         else:
-            # 2. 雲端沒有，呼叫 Gemini 產圖
-            result = gemini_client.models.generate_images(
-                model='imagen-3.0-generate-002',
-                prompt=keyword,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/png",
-                    aspect_ratio="1:1",
-                )
-            )
-            for generated_image in result.generated_images:
-                image = PILImage.open(io.BytesIO(generated_image.image.image_bytes))
-                image.save(local_path)
-                break
-
-            # 上傳至 Google Drive
-            upload_image_to_drive(local_path, file_name)
-            content = f"✨ 已透過 Gemini 生成「{keyword}」並自動同步至雲端硬碟！這是給 <@{user_id}> 的圖片："
-
-        # 3. 透過 Discord Followup API 補發訊息與附件
-        with open(local_path, "rb") as f:
-            files = {"file": (file_name, f, "image/png")}
-            payload = {"content": content}
-            requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
+            # 雲端硬碟找不到時的提示訊息
+            payload = {"content": f"❌ 抱歉，雲端硬碟中找不到關鍵字為「{keyword}」（檔名：`{file_name}.png`）的圖片。"}
+            requests.post(followup_url, json=payload)
 
     except Exception as e:
-        error_payload = {"content": f"❌ 處理「{keyword}」時發生錯誤：`{str(e)}`"}
+        error_payload = {"content": f"❌ 尋找圖片時發生錯誤：`{str(e)}`"}
         requests.post(followup_url, json=error_payload)
 
 # ================= 4. FastAPI 路由設定 =================
