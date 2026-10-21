@@ -1,3 +1,7 @@
+register_cmd.py
+credentials.json
+
+
 # Python 暫存
 __pycache__/
 *.py[cod]

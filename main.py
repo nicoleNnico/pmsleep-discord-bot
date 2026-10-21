@@ -12,6 +12,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import nacl.signing
 import nacl.exceptions
+import traceback
 
 app = FastAPI()
 
@@ -48,7 +49,9 @@ def verify_discord_signature(request_body: bytes, signature: str, timestamp: str
     try:
         verify_key.verify(timestamp.encode() + request_body, bytes.fromhex(signature))
         return True
-    except nacl.exceptions.BadSignatureError:
+    except Exception as e:
+        print(f"簽章驗證失敗詳細原因: {e}")
+        traceback.print_exc()
         return False
 
 def find_image_in_drive(file_name: str):
