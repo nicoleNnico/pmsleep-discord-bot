@@ -44,13 +44,36 @@ os.makedirs(LOCAL_TEMP_DIR, exist_ok=True)
 def verify_discord_signature(request_body: bytes, signature: str, timestamp: str) -> bool:
     """驗證 Discord Webhook 請求簽章"""
     if not DISCORD_PUBLIC_KEY:
+        print("❌ [簽章錯誤] DISCORD_PUBLIC_KEY 環境變數為空或未設定！")
         return False
-    verify_key = nacl.signing.VerifyKey(bytes.fromhex(DISCORD_PUBLIC_KEY))
+        
+    if not signature or not timestamp:
+        print(f"❌ [簽章錯誤] 缺少必要的 Headers - Signature: {signature}, Timestamp: {timestamp}")
+        return False
+
     try:
-        verify_key.verify(timestamp.encode() + request_body, bytes.fromhex(signature))
+        # 將 Hex 字串轉成 PyNaCl 的 VerifyKey
+        verify_key = nacl.signing.VerifyKey(bytes.fromhex(DISCORD_PUBLIC_KEY))
+        
+        # 組合 Discord 規定的驗證訊息：timestamp.encode() + request_body
+        message = timestamp.encode() + request_body
+        
+        # 進行驗證
+        verify_key.verify(message, bytes.fromhex(signature))
+        print("✅ 簽章驗證成功！")
         return True
+        
+    except ValueError as ve:
+        print(f"❌ [格式錯誤] Public Key 或 Signature 不是合法的 Hex 字串: {ve}")
+        return False
+    except nacl.exceptions.BadSignatureError:
+        print(f"❌ [簽章不符] Discord 傳來的簽章與 Public Key 比對失敗！")
+        print(f"   - Timestamp: {timestamp}")
+        print(f"   - Signature (前10碼): {signature[:10]}...")
+        print(f"   - Public Key (前10碼): {DISCORD_PUBLIC_KEY[:10]}...")
+        return False
     except Exception as e:
-        print(f"簽章驗證失敗詳細原因: {e}")
+        print(f"❌ [未預期錯誤] 驗過程發生例外: {e}")
         traceback.print_exc()
         return False
 
