@@ -112,12 +112,13 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
     如果找到：直接下載並回傳給使用者。
     如果找不到：直接回報雲端硬碟沒有該圖片，不會再進行額外生圖。
     """
+    print(f"▶️ interaction_id={interaction_id} 背景工作已啟動", flush=True)
     followup_url = f"https://discord.com/api/v10/webhooks/{DISCORD_APP_ID}/{interaction_token}"
     
     safe_filename = "".join([c for c in keyword if c.isalnum() or c.isspace()]).strip().replace(" ", "_")
     file_name = f"{safe_filename}.png"
     local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
-    print(f"🔍 interaction_id={interaction_id} 搜尋檔案: {file_name}")
+    print(f"🔍 interaction_id={interaction_id} 搜尋檔案: {file_name}", flush=True)
 
     try:
         # 1. 尋找檔案
@@ -175,7 +176,13 @@ async def discord_interactions(request: Request, background_tasks: BackgroundTas
 
         data = await request.json()
         interaction_id = data.get("id", "unknown")
-        print(f"📥 收到 Discord interaction_id={interaction_id}")
+        interaction_type = data.get("type")
+        command_name = data.get("data", {}).get("name")
+        print(
+            f"📥 收到 Discord interaction_id={interaction_id} "
+            f"type={interaction_type} command={command_name}",
+            flush=True,
+        )
 
         # 1. 處理 Discord PING
         if data.get("type") == 1:
@@ -198,6 +205,10 @@ async def discord_interactions(request: Request, background_tasks: BackgroundTas
                     interaction_token,
                     user_id,
                     keyword,
+                )
+                print(
+                    f"📌 interaction_id={interaction_id} 背景工作已排程",
+                    flush=True,
                 )
 
                 return JSONResponse({
