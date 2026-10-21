@@ -155,41 +155,45 @@ def home():
 @app.post("/interactions")
 async def discord_interactions(request: Request, background_tasks: BackgroundTasks):
     """Discord Webhook 接收主入口"""
-    signature = request.headers.get("X-Signature-Ed25519")
-    timestamp = request.headers.get("X-Signature-Timestamp")
-    body_bytes = await request.body()
+    try:
+        signature = request.headers.get("X-Signature-Ed25519")
+        timestamp = request.headers.get("X-Signature-Timestamp")
+        body_bytes = await request.body()
 
-    # 安全簽章驗證
-    if not signature or not timestamp or not verify_discord_signature(body_bytes, signature, timestamp):
-        raise HTTPException(status_code=401, detail="Invalid request signature")
+        if not signature or not timestamp or not verify_discord_signature(body_bytes, signature, timestamp):
+            raise HTTPException(status_code=401, detail="Invalid request signature")
 
-    data = await request.json()
+        data = await request.json()
+        print(f"📥 收到 Discord 請求資料: {data}") # 印出收到的資料
 
-    # 1. 處理 Discord PING (驗證 Endpoint 時使用)
-    if data.get("type") == 1:
-        return JSONResponse({"type": 1})
+        # 1. 處理 Discord PING
+        if data.get("type") == 1:
+            return JSONResponse({"type": 1})
 
-    # 2. 處理 Slash Command (例如 /img)
-    if data.get("type") == 2:
-        command_name = data["data"]["name"]
-        
-        if command_name == "img":
-            options = data["data"].get("options", [])
-            keyword = next((opt["value"] for opt in options if opt["name"] == "keyword"), "預設")
+        # 2. 處理 Slash Command
+        if data.get("type") == 2:
+            command_name = data["data"]["name"]
             
-            interaction_token = data["token"]
-            user_id = data.get("member", {}).get("user", {}).get("id") or data.get("user", {}).get("id")
+            if command_name == "nico": # (或是你的指令名稱)
+                options = data["data"].get("options", [])
+                keyword = next((opt["value"] for opt in options if opt["name"] == "keyword"), "預設")
+                
+                interaction_token = data["token"]
+                user_id = data.get("member", {}).get("user", {}).get("id") or data.get("user", {}).get("id")
 
-            # 加入背景任務，避免超過 3 秒限制
-            background_tasks.add_task(process_image_interaction, interaction_token, user_id, keyword)
+                background_tasks.add_task(process_image_interaction, interaction_token, user_id, keyword)
 
-            # 立即回覆 Type 5：宣告機器人思考中 (Deferred Channel Message)
-            return JSONResponse({
-                "type": 5,
-                "data": {"content": f"🔍 正在處理「{keyword}」，請稍候..."}
-            })
+                return JSONResponse({
+                    "type": 5,
+                    "data": {"content": f"🔍 正在處理「{keyword}」，請稍候..."}
+                })
 
-    return JSONResponse({"error": "Unsupported interaction type"}, status_code=400)
+        return JSONResponse({"error": "Unsupported interaction type"}, status_code=400)
+
+    except Exception as e:
+        print(f"❌ 處理 interactions 時發生嚴重錯誤: {e}")
+        traceback.print_exc() # 印出完整的錯誤堆疊
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 if __name__ == "__main__":
     import uvicorn
