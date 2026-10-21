@@ -101,7 +101,12 @@ def download_image_from_drive(file_id: str, local_path: str):
 #     return file.get('id')
 
 # ================= 3. 背景非同步處理任務 =================
-def process_image_interaction(interaction_token: str, user_id: str, keyword: str):
+def send_followup(followup_url: str, interaction_id: str, payload: dict):
+    response = requests.post(followup_url, json=payload, timeout=30)
+    print(f"Discord follow-up interaction_id={interaction_id} status={response.status_code}")
+    response.raise_for_status()
+
+def process_image_interaction(interaction_id: str, interaction_token: str, user_id: str, keyword: str):
     """
     到 Google 雲端硬碟尋找對應的 .png 圖片。
     如果找到：直接下載並回傳給使用者。
@@ -112,6 +117,7 @@ def process_image_interaction(interaction_token: str, user_id: str, keyword: str
     safe_filename = "".join([c for c in keyword if c.isalnum() or c.isspace()]).strip().replace(" ", "_")
     file_name = f"{safe_filename}.png"
     local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
+    print(f"🔍 interaction_id={interaction_id} 搜尋檔案: {file_name}")
 
     try:
         # 1. 尋找檔案
@@ -122,20 +128,32 @@ def process_image_interaction(interaction_token: str, user_id: str, keyword: str
             content = f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
             
             with open(local_path, "rb") as f:
-                files = {"file": (file_name, f, "image/png")}
+                files = {"files[0]": (file_name, f, "image/png")}
                 payload = {"content": content}
-                requests.post(followup_url, data={"payload_json": json.dumps(payload)}, files=files)
+                response = requests.post(
+                    followup_url,
+                    data={"payload_json": json.dumps(payload)},
+                    files=files,
+                    timeout=30,
+                )
+                print(f"Discord follow-up interaction_id={interaction_id} status={response.status_code}")
+                response.raise_for_status()
         else:
             # 找不到檔案時，主動回傳提示，解除「思考中」狀態
             payload = {"content": f"❌ 抱歉，雲端硬碟中找不到檔名為 `{file_name}` 的圖片。"}
-            requests.post(followup_url, json=payload)
+            send_followup(followup_url, interaction_id, payload)
 
     except Exception as e:
         # 發生任何例外錯誤時，把錯誤傳回 Discord，避免無限卡住
-        print(f"❌ 發生錯誤: {e}")
-        traceback.print_exc()
-        error_payload = {"content": f"❌ 處理圖片時發生內部錯誤：`{str(e)}`"}
-        requests.post(followup_url, json=error_payload)
+        print(f"❌ interaction_id={interaction_id} 處理失敗: {type(e).__name__}")
+        error_payload = {"content": "❌ 處理圖片時發生內部錯誤，請稍後再試。"}
+        try:
+            send_followup(followup_url, interaction_id, error_payload)
+        except Exception as followup_error:
+            print(
+                f"❌ interaction_id={interaction_id} 無法送出錯誤回覆: "
+                f"{type(followup_error).__name__}"
+            )
 
 
 # ================= 4. FastAPI 路由設定 =================
@@ -156,7 +174,8 @@ async def discord_interactions(request: Request, background_tasks: BackgroundTas
             raise HTTPException(status_code=401, detail="Invalid request signature")
 
         data = await request.json()
-        print(f"📥 收到 Discord 請求資料: {data}") # 印出收到的資料
+        interaction_id = data.get("id", "unknown")
+        print(f"📥 收到 Discord interaction_id={interaction_id}")
 
         # 1. 處理 Discord PING
         if data.get("type") == 1:
@@ -168,12 +187,18 @@ async def discord_interactions(request: Request, background_tasks: BackgroundTas
             
             if command_name == "nico": # (或是你的指令名稱)
                 options = data["data"].get("options", [])
-                keyword = next((opt["value"] for opt in options if opt["name"] == "keyword"), "預設")
+                keyword = next((opt["value"] for opt in options if opt["name"] == "keyword"), "性格")
                 
                 interaction_token = data["token"]
                 user_id = data.get("member", {}).get("user", {}).get("id") or data.get("user", {}).get("id")
 
-                background_tasks.add_task(process_image_interaction, interaction_token, user_id, keyword)
+                background_tasks.add_task(
+                    process_image_interaction,
+                    interaction_id,
+                    interaction_token,
+                    user_id,
+                    keyword,
+                )
 
                 return JSONResponse({
                     "type": 5,
