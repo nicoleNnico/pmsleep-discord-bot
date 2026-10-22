@@ -1,6 +1,9 @@
 register_cmd.py
 credentials.json
 *test*
+assets/images/*.jpg
+assets/images/*.jpeg
+assets/images/*.png
 
 # Python 暫存
 __pycache__/

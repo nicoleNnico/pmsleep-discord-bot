@@ -1,13 +1,10 @@
 import os
-import io
 import json
+import mimetypes
 import time
 import requests
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import nacl.signing
 import nacl.exceptions
 
@@ -17,51 +14,34 @@ def log_step(interaction_id: str, message: str):
     print(f"[interaction_id={interaction_id}] {message}", flush=True)
 
 # ================= 1. 環境變數讀取 =================
-# GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_PUBLIC_KEY = os.environ.get("DISCORD_PUBLIC_KEY")
 DISCORD_APP_ID = os.environ.get("DISCORD_APP_ID")
-GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
-CREDENTIALS_JSON_CONTENT = os.environ.get("CREDENTIALS_JSON_CONTENT")
 print(
     "啟動：環境變數狀態 "
     f"DISCORD_PUBLIC_KEY={bool(DISCORD_PUBLIC_KEY)} "
-    f"DISCORD_APP_ID={bool(DISCORD_APP_ID)} "
-    f"GDRIVE_FOLDER_ID={bool(GDRIVE_FOLDER_ID)}",
+    f"DISCORD_APP_ID={bool(DISCORD_APP_ID)}",
     flush=True,
 )
 
-# 動態還原 credentials.json (供 Google API 使用)
-CREDENTIALS_FILE = "credentials.json"
-print("啟動：檢查 Google 服務帳戶憑證設定", flush=True)
-print(f"啟動：CREDENTIALS_JSON_CONTENT 已設定={bool(CREDENTIALS_JSON_CONTENT)}", flush=True)
-if CREDENTIALS_JSON_CONTENT and not os.path.exists(CREDENTIALS_FILE):
-    print("啟動：尚無本機憑證檔，正在從環境變數建立", flush=True)
-    with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-        f.write(CREDENTIALS_JSON_CONTENT)
-    print("啟動：憑證檔建立完成", flush=True)
-elif os.path.exists(CREDENTIALS_FILE):
-    print("啟動：使用既有本機憑證檔", flush=True)
-else:
-    print("啟動錯誤：未設定憑證 JSON，且本機憑證檔不存在", flush=True)
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_FILES_CONFIG = os.path.join(PROJECT_DIR, "assets", "image_files.json")
+with open(IMAGE_FILES_CONFIG, encoding="utf-8") as config_file:
+    image_file_entries = json.load(config_file)
 
-# 初始化 Google Drive API Client
-SCOPES = ['https://www.googleapis.com/auth/drive']
-print(f"啟動：初始化 Google Drive API client；資料夾 ID 已設定={bool(GDRIVE_FOLDER_ID)}", flush=True)
-try:
-    creds = service_account.Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-    print("啟動：服務帳戶憑證解析完成", flush=True)
-    drive_service = build('drive', 'v3', credentials=creds)
-except Exception as e:
-    print(f"啟動錯誤：Google Drive API client 初始化失敗；error_type={type(e).__name__}", flush=True)
-    raise
-print("啟動：Google Drive API client 初始化完成", flush=True)
+if not isinstance(image_file_entries, dict):
+    raise ValueError(f"圖片清單必須是 JSON object：{IMAGE_FILES_CONFIG}")
 
-# 初始化 Gemini Client
-# gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-
-LOCAL_TEMP_DIR = "./temp_images"
-os.makedirs(LOCAL_TEMP_DIR, exist_ok=True)
-print(f"啟動：本機暫存目錄就緒；exists={os.path.isdir(LOCAL_TEMP_DIR)}", flush=True)
+IMAGE_FILES = {}
+for keyword, relative_path in image_file_entries.items():
+    if not isinstance(keyword, str) or not keyword.strip():
+        raise ValueError("圖片清單中的關鍵字必須是非空字串")
+    if not isinstance(relative_path, str) or not relative_path.strip():
+        raise ValueError(f"圖片路徑必須是非空字串：{keyword!r}")
+    if os.path.isabs(relative_path):
+        raise ValueError(f"圖片路徑必須相對於專案根目錄：{relative_path!r}")
+    IMAGE_FILES[keyword] = os.path.normpath(
+        os.path.join(PROJECT_DIR, relative_path)
+    )
 
 # ================= 2. 輔助函式 =================
 def verify_discord_signature(request_body: bytes, signature: str, timestamp: str) -> bool:
@@ -102,140 +82,6 @@ def verify_discord_signature(request_body: bytes, signature: str, timestamp: str
     except Exception as e:
         print(f"簽章驗證發生未預期錯誤：{type(e).__name__}", flush=True)
         return False
-
-def find_image_in_drive(file_stem: str, interaction_id: str):
-    """依檔名主體比對資料夾內圖片，不將副檔名納入比對。"""
-    query = f"'{GDRIVE_FOLDER_ID}' in parents and trashed = false"
-    page_token = None
-    files = []
-    started_at = time.perf_counter()
-    log_step(interaction_id, f"Drive 搜尋：列取資料夾檔案，依檔名主體比對；file_stem={file_stem!r}")
-
-    try:
-        while True:
-            results = drive_service.files().list(
-                q=query,
-                fields="nextPageToken, files(id, name, mimeType)",
-                pageSize=1000,
-                pageToken=page_token,
-            ).execute()
-            files.extend(results.get("files", []))
-            page_token = results.get("nextPageToken")
-            if not page_token:
-                break
-
-    except Exception as e:
-        log_step(
-            interaction_id,
-            f"Drive 搜尋失敗；已列取項目數={len(files)} "
-            f"elapsed={time.perf_counter() - started_at:.2f}s "
-            f"error_type={type(e).__name__}",
-        )
-        raise
-
-    log_step(
-        interaction_id,
-        f"Drive 資料夾檔案列取完成；total={len(files)} "
-        f"elapsed={time.perf_counter() - started_at:.2f}s",
-    )
-
-    matching_files = [
-        drive_file
-        for drive_file in files
-        if drive_file.get("mimeType", "").startswith("image/")
-        and os.path.splitext(drive_file.get("name", ""))[0].casefold() == file_stem.casefold()
-    ]
-    matching_files.sort(
-        key=lambda drive_file: (
-            {".png": 0, ".jpg": 1}.get(
-                os.path.splitext(drive_file.get("name", ""))[1].lower(),
-                2,
-            ),
-            drive_file.get("name", "").casefold(),
-        )
-    )
-
-    if matching_files:
-        selected_file = matching_files[0]
-        log_step(
-            interaction_id,
-            f"Drive 搜尋完成；filename_matches={len(matching_files)} "
-            f"selected={selected_file.get('name')!r} "
-            f"mimeType={selected_file.get('mimeType')!r}",
-        )
-        return (
-            selected_file["id"],
-            selected_file["name"],
-            selected_file.get("mimeType", "application/octet-stream"),
-        )
-
-    log_step(interaction_id, "Drive 搜尋結果：沒有符合檔名主體的圖片；輸出資料夾清單")
-    for index, drive_file in enumerate(files, start=1):
-        log_step(
-            interaction_id,
-            f"Drive 清單項目 #{index}："
-            f"name={drive_file.get('name', '<unnamed>')!r} "
-            f"mimeType={drive_file.get('mimeType', '<unknown>')!r}",
-        )
-    log_step(interaction_id, f"Drive 清單列取完成；total={len(files)}")
-    return None
-
-def download_image_from_drive(file_id: str, local_path: str, interaction_id: str):
-    """從 Google Drive 下載檔案到本地"""
-    log_step(interaction_id, "Drive 下載：建立媒體請求")
-    started_at = time.perf_counter()
-    media_request = drive_service.files().get_media(fileId=file_id)
-    log_step(interaction_id, f"Drive 下載：開始寫入暫存檔；path={local_path}")
-    with io.FileIO(local_path, 'wb') as fh:
-        downloader = MediaIoBaseDownload(fh, media_request)
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-            if status:
-                log_step(
-                    interaction_id,
-                    f"Drive 下載進度：{status.progress() * 100:.0f}%",
-                )
-
-    log_step(
-        interaction_id,
-        f"Drive 下載完成；bytes={os.path.getsize(local_path)} "
-        f"elapsed={time.perf_counter() - started_at:.2f}s",
-    )
-
-def ensure_image_extension(file_name: str, mime_type: str, interaction_id: str) -> str:
-    """若 Drive 檔名沒有副檔名，依 MIME type 補上常見圖片副檔名。"""
-    if os.path.splitext(file_name)[1]:
-        return file_name
-
-    extension_by_mime_type = {
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-        "image/bmp": ".bmp",
-        "image/tiff": ".tiff",
-        "image/svg+xml": ".svg",
-        "image/avif": ".avif",
-    }
-    extension = extension_by_mime_type.get(mime_type.lower())
-    if not extension:
-        raise ValueError(f"無法從圖片 MIME type 推斷副檔名：{mime_type}")
-
-    updated_name = f"{file_name}{extension}"
-    log_step(
-        interaction_id,
-        f"Drive 檔名沒有副檔名；依 MIME type 補上 {extension}，"
-        f"Discord 上傳檔名={updated_name!r}",
-    )
-    return updated_name
-
-# def upload_image_to_drive(local_path: str, file_name: str):
-#     """上傳本地圖片到 Google Drive"""
-#     file_metadata = {'name': file_name, 'parents': [GDRIVE_FOLDER_ID]}
-#     media = MediaFileUpload(local_path, mimetype='image/png')
-#     file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-#     return file.get('id')
 
 # ================= 3. 背景非同步處理任務 =================
 def send_followup(
@@ -351,58 +197,28 @@ def process_image_interaction(
     user_id: str,
     keyword: str,
 ):
-    """
-    到 Google 雲端硬碟依檔名主體尋找圖片，不比對副檔名。
-    如果找到：直接下載並回傳給使用者。
-    如果找不到：直接回報雲端硬碟沒有該圖片，不會再進行額外生圖。
-    """
+    """依本機圖片字典找到檔案並上傳到 Discord。"""
     task_started_at = time.perf_counter()
-    log_step(interaction_id, "背景工作已啟動")
+    log_step(interaction_id, "本機圖片背景工作已啟動")
     followup_url = f"https://discord.com/api/v10/webhooks/{DISCORD_APP_ID}/{interaction_token}"
     log_step(interaction_id, f"Follow-up webhook 已建立；application_id_present={bool(application_id)}")
-    
-    # 處理中文或空白檔名
+
     log_step(interaction_id, f"輸入關鍵字：{keyword!r}")
-    safe_filename = "".join([c for c in keyword if c.isalnum() or c.isspace()]).strip().replace(" ", "_")
-    log_step(interaction_id, f"檔名主體解析完成；file_stem={safe_filename}")
+    safe_filename = "".join(
+        c for c in keyword if c.isalnum() or c.isspace()
+    ).strip().replace(" ", "_")
+    image_path = IMAGE_FILES.get(safe_filename)
+    log_step(
+        interaction_id,
+        f"本機圖片查找完成；file_stem={safe_filename!r} found={image_path is not None}",
+    )
 
-    stage = "Drive 搜尋"
+    stage = "本機圖片查找"
     try:
-        image = find_image_in_drive(safe_filename, interaction_id)
-
-        if image:
-            file_id, file_name, mime_type = image
-            file_name = ensure_image_extension(file_name, mime_type, interaction_id)
-            local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
-            log_step(interaction_id, f"Drive 搜尋結果：找到符合檔案；file_name={file_name}")
-
-            stage = "Drive 下載"
-            download_image_from_drive(file_id, local_path, interaction_id)
-
-            content = f"<@{user_id}> keyword: `{keyword}`"
-            
-            stage = "Discord 圖片 follow-up"
-            with open(local_path, "rb") as f:
-                log_step(
-                    interaction_id,
-                    f"Discord 上傳：開啟暫存圖片；exists={os.path.isfile(local_path)} "
-                    f"bytes={os.path.getsize(local_path)}",
-                )
-                files = {"files[0]": (file_name, f, mime_type)}
-                payload = {"content": content}
-                send_followup(
-                    followup_url,
-                    interaction_id,
-                    payload,
-                    interaction_token,
-                    files,
-                )
-        else:
-            log_step(interaction_id, "Drive 搜尋結果：沒有符合檔名主體的圖片")
+        if image_path is None:
             payload = {
                 "content": (
-                    f"❌ 抱歉，雲端硬碟中找不到檔名為 "
-                    f"`{safe_filename}` 的圖片（已忽略副檔名）。"
+                    f"❌ 找不到檔名為 `{safe_filename}` 的本機圖片。"
                 )
             }
             stage = "Discord 找不到檔案 follow-up"
@@ -412,7 +228,28 @@ def process_image_interaction(
                 payload,
                 interaction_token,
             )
+        else:
+            if not os.path.isfile(image_path):
+                raise FileNotFoundError(f"本機圖片檔案不存在：{image_path}")
 
+            file_name = os.path.basename(image_path)
+            mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+            content = f"<@{user_id}> keyword: `{keyword}`"
+            stage = "Discord 本機圖片 follow-up"
+            with open(image_path, "rb") as image_file:
+                log_step(
+                    interaction_id,
+                    f"Discord 上傳：開啟本機圖片；path={image_path} "
+                    f"bytes={os.path.getsize(image_path)}",
+                )
+                files = {"files[0]": (file_name, image_file, mime_type)}
+                send_followup(
+                    followup_url,
+                    interaction_id,
+                    {"content": content},
+                    interaction_token,
+                    files,
+                )
     except Exception as e:
         log_step(
             interaction_id,
@@ -428,11 +265,10 @@ def process_image_interaction(
             return
 
         try:
-            error_payload = {"content": "❌ 處理圖片時發生內部錯誤，請稍後再試。"}
             send_followup(
                 followup_url,
                 interaction_id,
-                error_payload,
+                {"content": "❌ 處理圖片時發生內部錯誤，請稍後再試。"},
                 interaction_token,
             )
         except Exception as followup_error:
@@ -444,7 +280,7 @@ def process_image_interaction(
     else:
         log_step(
             interaction_id,
-            f"背景工作結束；elapsed={time.perf_counter() - task_started_at:.2f}s",
+            f"本機圖片背景工作結束；elapsed={time.perf_counter() - task_started_at:.2f}s",
         )
 
 
