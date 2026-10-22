@@ -314,7 +314,7 @@ def process_image_interaction(
     """
     task_started_at = time.perf_counter()
     log_step(interaction_id, "背景工作已啟動")
-    followup_url = f"https://discord.com/api/v10/webhooks/{application_id}/{interaction_token}"
+    followup_url = f"https://discord.com/api/v10/webhooks/{DISCORD_APP_ID}/{interaction_token}"
     log_step(interaction_id, f"Follow-up webhook 已建立；application_id_present={bool(application_id)}")
     
     # 處理中文或空白檔名
