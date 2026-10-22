@@ -257,12 +257,18 @@ def send_followup(
             error_body = {}
         if not isinstance(error_body, dict):
             error_body = {}
-        error_message = str(error_body.get("message", ""))[:300]
-        error_message = error_message.replace(interaction_token, "[REDACTED]")
-        error_code = error_body.get("code")
+        error_details = {
+            "code": error_body.get("code"),
+            "message": error_body.get("message"),
+            "errors": error_body.get("errors"),
+        }
+        error_details = json.dumps(error_details, ensure_ascii=False, default=str)[:2000]
+        error_details = error_details.replace(interaction_token, "[REDACTED]")
         log_step(
             interaction_id,
-            f"Discord 錯誤詳情；code={error_code} message={error_message!r}",
+            "Discord 錯誤詳情；"
+            f"content_type={response.headers.get('Content-Type')} "
+            f"body={error_details}",
         )
     response.raise_for_status()
     log_step(interaction_id, "Discord follow-up 成功")
