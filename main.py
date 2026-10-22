@@ -278,23 +278,27 @@ def send_followup(
         f"elapsed={time.perf_counter() - started_at:.2f}s",
     )
     if not response.ok:
+        content_type = response.headers.get("Content-Type", "")
         try:
             error_body = response.json()
         except ValueError:
             error_body = {}
         if not isinstance(error_body, dict):
             error_body = {}
-        error_details = {
-            "code": error_body.get("code"),
-            "message": error_body.get("message"),
-            "errors": error_body.get("errors"),
-        }
-        error_details = json.dumps(error_details, ensure_ascii=False, default=str)[:2000]
-        error_details = error_details.replace(interaction_token, "[REDACTED]")
+        if error_body:
+            error_details = {
+                "code": error_body.get("code"),
+                "message": error_body.get("message"),
+                "errors": error_body.get("errors"),
+            }
+            error_details = json.dumps(error_details, ensure_ascii=False, default=str)
+        else:
+            error_details = response.text
+        error_details = error_details.replace(interaction_token, "[REDACTED]")[:2000]
         log_step(
             interaction_id,
             "Discord 錯誤詳情；"
-            f"content_type={response.headers.get('Content-Type')} "
+            f"content_type={content_type} "
             f"body={error_details}",
         )
     response.raise_for_status()
