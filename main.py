@@ -107,63 +107,22 @@ def verify_discord_signature(request_body: bytes, signature: str, timestamp: str
         return False
 
 def find_image_in_drive(file_stem: str, interaction_id: str):
-    """先在指定的 Google Drive 資料夾搜尋 PNG，再搜尋 JPG。"""
-    for extension in (".png", ".jpg"):
-        file_name = f"{file_stem}{extension}"
-        query = f"'{GDRIVE_FOLDER_ID}' in parents and name = '{file_name}' and trashed = false"
-        log_step(interaction_id, f"Drive 搜尋：送出查詢；file_name={file_name}")
-        started_at = time.perf_counter()
-        try:
-            results = drive_service.files().list(
-                q=query,
-                fields="files(id, name)",
-            ).execute()
-        except Exception as e:
-            log_step(
-                interaction_id,
-                f"Drive 搜尋失敗；file_name={file_name} "
-                f"elapsed={time.perf_counter() - started_at:.2f}s "
-                f"error_type={type(e).__name__}",
-            )
-            raise
-
-        files = results.get('files', [])
-        log_step(
-            interaction_id,
-            f"Drive 搜尋完成；file_name={file_name} matches={len(files)} "
-            f"elapsed={time.perf_counter() - started_at:.2f}s",
-        )
-        if files:
-            return files[0]['id'], file_name
-
-    return None
-
-def log_drive_folder_contents(interaction_id: str):
-    """將指定 Google Drive 資料夾內所有項目名稱輸出至應用程式 logs。"""
+    """依檔名主體比對資料夾內圖片，不將副檔名納入比對。"""
     query = f"'{GDRIVE_FOLDER_ID}' in parents and trashed = false"
     page_token = None
-    file_count = 0
+    files = []
     started_at = time.perf_counter()
-    log_step(interaction_id, "Drive 清單：開始列出資料夾內所有項目")
+    log_step(interaction_id, f"Drive 搜尋：列取資料夾檔案，依檔名主體比對；file_stem={file_stem!r}")
 
     try:
         while True:
             results = drive_service.files().list(
                 q=query,
-                fields="nextPageToken, files(name, mimeType)",
+                fields="nextPageToken, files(id, name, mimeType)",
                 pageSize=1000,
                 pageToken=page_token,
             ).execute()
-            files = results.get("files", [])
-            for drive_file in files:
-                file_count += 1
-                log_step(
-                    interaction_id,
-                    f"Drive 清單項目 #{file_count}："
-                    f"name={drive_file.get('name', '<unnamed>')!r} "
-                    f"mimeType={drive_file.get('mimeType', '<unknown>')!r}",
-                )
-
+            files.extend(results.get("files", []))
             page_token = results.get("nextPageToken")
             if not page_token:
                 break
@@ -171,7 +130,7 @@ def log_drive_folder_contents(interaction_id: str):
     except Exception as e:
         log_step(
             interaction_id,
-            f"Drive 清單列取失敗；列出項目數={file_count} "
+            f"Drive 搜尋失敗；已列取項目數={len(files)} "
             f"elapsed={time.perf_counter() - started_at:.2f}s "
             f"error_type={type(e).__name__}",
         )
@@ -179,9 +138,50 @@ def log_drive_folder_contents(interaction_id: str):
 
     log_step(
         interaction_id,
-        f"Drive 清單列取完成；total={file_count} "
+        f"Drive 資料夾檔案列取完成；total={len(files)} "
         f"elapsed={time.perf_counter() - started_at:.2f}s",
     )
+
+    matching_files = [
+        drive_file
+        for drive_file in files
+        if drive_file.get("mimeType", "").startswith("image/")
+        and os.path.splitext(drive_file.get("name", ""))[0].casefold() == file_stem.casefold()
+    ]
+    matching_files.sort(
+        key=lambda drive_file: (
+            {".png": 0, ".jpg": 1}.get(
+                os.path.splitext(drive_file.get("name", ""))[1].lower(),
+                2,
+            ),
+            drive_file.get("name", "").casefold(),
+        )
+    )
+
+    if matching_files:
+        selected_file = matching_files[0]
+        log_step(
+            interaction_id,
+            f"Drive 搜尋完成；filename_matches={len(matching_files)} "
+            f"selected={selected_file.get('name')!r} "
+            f"mimeType={selected_file.get('mimeType')!r}",
+        )
+        return (
+            selected_file["id"],
+            selected_file["name"],
+            selected_file.get("mimeType", "application/octet-stream"),
+        )
+
+    log_step(interaction_id, "Drive 搜尋結果：沒有符合檔名主體的圖片；輸出資料夾清單")
+    for index, drive_file in enumerate(files, start=1):
+        log_step(
+            interaction_id,
+            f"Drive 清單項目 #{index}："
+            f"name={drive_file.get('name', '<unnamed>')!r} "
+            f"mimeType={drive_file.get('mimeType', '<unknown>')!r}",
+        )
+    log_step(interaction_id, f"Drive 清單列取完成；total={len(files)}")
+    return None
 
 def download_image_from_drive(file_id: str, local_path: str, interaction_id: str):
     """從 Google Drive 下載檔案到本地"""
@@ -269,7 +269,7 @@ def send_followup(
 
 def process_image_interaction(interaction_id: str, interaction_token: str, user_id: str, keyword: str):
     """
-    到 Google 雲端硬碟先尋找對應的 .png，找不到再尋找 .jpg。
+    到 Google 雲端硬碟依檔名主體尋找圖片，不比對副檔名。
     如果找到：直接下載並回傳給使用者。
     如果找不到：直接回報雲端硬碟沒有該圖片，不會再進行額外生圖。
     """
@@ -287,7 +287,7 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
         image = find_image_in_drive(safe_filename, interaction_id)
 
         if image:
-            file_id, file_name = image
+            file_id, file_name, mime_type = image
             local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
             log_step(interaction_id, f"Drive 搜尋結果：找到符合檔案；file_name={file_name}")
 
@@ -303,7 +303,6 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
                     f"Discord 上傳：開啟暫存圖片；exists={os.path.isfile(local_path)} "
                     f"bytes={os.path.getsize(local_path)}",
                 )
-                mime_type = "image/png" if file_name.endswith(".png") else "image/jpeg"
                 files = {"files[0]": (file_name, f, mime_type)}
                 payload = {"content": content}
                 send_followup(
@@ -314,13 +313,11 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
                     files,
                 )
         else:
-            log_step(interaction_id, "Drive 搜尋結果：PNG 與 JPG 都沒有符合檔案")
-            stage = "Drive 資料夾清單"
-            log_drive_folder_contents(interaction_id)
+            log_step(interaction_id, "Drive 搜尋結果：沒有符合檔名主體的圖片")
             payload = {
                 "content": (
                     f"❌ 抱歉，雲端硬碟中找不到檔名為 "
-                    f"`{safe_filename}.png` 或 `{safe_filename}.jpg` 的圖片。"
+                    f"`{safe_filename}` 的圖片（已忽略副檔名）。"
                 )
             }
             stage = "Discord 找不到檔案 follow-up"
