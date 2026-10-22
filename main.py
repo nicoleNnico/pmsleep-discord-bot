@@ -339,7 +339,7 @@ def process_image_interaction(
             stage = "Drive 下載"
             download_image_from_drive(file_id, local_path, interaction_id)
 
-            content = f"Hey <@{user_id}>！在雲端硬碟找到「{keyword}」的圖片囉："
+            content = f"<@{user_id}> keyword: `{keyword}`"
             
             stage = "Discord 圖片 follow-up"
             with open(local_path, "rb") as f:
