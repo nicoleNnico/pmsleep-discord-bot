@@ -5,9 +5,6 @@ import time
 import requests
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-# from google import genai
-# from google.genai import types
-# from PIL import Image as PILImage
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -248,61 +245,104 @@ def send_followup(
     interaction_token: str,
     files=None,
 ):
-    started_at = time.perf_counter()
-    log_step(
-        interaction_id,
-        f"Discord follow-up：開始送出；has_file={files is not None} timeout=15s",
-    )
-    try:
-        if files is None:
-            response = requests.post(followup_url, json=payload, timeout=15)
-        else:
-            response = requests.post(
-                followup_url,
-                data={"payload_json": json.dumps(payload)},
-                files=files,
-                timeout=15,
-            )
-    except requests.RequestException as e:
-        log_step(
-            interaction_id,
-            f"Discord follow-up 網路請求失敗；"
-            f"elapsed={time.perf_counter() - started_at:.2f}s "
-            f"error_type={type(e).__name__}",
-        )
-        raise
+    max_attempts = 2
+    max_retry_delay = 14 * 60
 
-    log_step(
-        interaction_id,
-        f"Discord follow-up 收到回應；status={response.status_code} "
-        f"elapsed={time.perf_counter() - started_at:.2f}s",
-    )
-    if not response.ok:
-        content_type = response.headers.get("Content-Type", "")
-        try:
-            error_body = response.json()
-        except ValueError:
-            error_body = {}
-        if not isinstance(error_body, dict):
-            error_body = {}
-        if error_body:
-            error_details = {
-                "code": error_body.get("code"),
-                "message": error_body.get("message"),
-                "errors": error_body.get("errors"),
-            }
-            error_details = json.dumps(error_details, ensure_ascii=False, default=str)
-        else:
-            error_details = response.text
-        error_details = error_details.replace(interaction_token, "[REDACTED]")[:2000]
+    for attempt in range(1, max_attempts + 1):
+        started_at = time.perf_counter()
         log_step(
             interaction_id,
-            "Discord 錯誤詳情；"
-            f"content_type={content_type} "
-            f"body={error_details}",
+            f"Discord follow-up：開始送出；has_file={files is not None} "
+            f"attempt={attempt}/{max_attempts} timeout=15s",
         )
-    response.raise_for_status()
-    log_step(interaction_id, "Discord follow-up 成功")
+        try:
+            if files is None:
+                response = requests.post(followup_url, json=payload, timeout=15)
+            else:
+                for file_data in files.values():
+                    file_data[1].seek(0)
+                response = requests.post(
+                    followup_url,
+                    data={"payload_json": json.dumps(payload)},
+                    files=files,
+                    timeout=15,
+                )
+        except requests.RequestException as e:
+            log_step(
+                interaction_id,
+                f"Discord follow-up 網路請求失敗；"
+                f"elapsed={time.perf_counter() - started_at:.2f}s "
+                f"error_type={type(e).__name__}",
+            )
+            raise
+
+        log_step(
+            interaction_id,
+            f"Discord follow-up 收到回應；status={response.status_code} "
+            f"elapsed={time.perf_counter() - started_at:.2f}s",
+        )
+
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after is None:
+                try:
+                    error_body = response.json()
+                    retry_after = (
+                        error_body.get("retry_after")
+                        if isinstance(error_body, dict)
+                        else None
+                    )
+                except (ValueError, AttributeError):
+                    retry_after = None
+            try:
+                retry_delay = float(retry_after) if retry_after is not None else 60.0
+            except (TypeError, ValueError):
+                retry_delay = 60.0
+            retry_delay = max(retry_delay, 60.0)
+
+            if attempt == max_attempts or retry_delay > max_retry_delay:
+                log_step(
+                    interaction_id,
+                    "Discord follow-up 遭遇 HTTP 429；"
+                    f"不再重試；retry_after={retry_delay:.1f}s",
+                )
+                raise requests.HTTPError("Discord follow-up rate limited", response=response)
+
+            log_step(
+                interaction_id,
+                f"Discord follow-up 遭遇 HTTP 429；等待 {retry_delay:.1f}s 後"
+                f"再嘗試一次（不超過 {max_retry_delay}s）",
+            )
+            time.sleep(retry_delay)
+            continue
+
+        if not response.ok:
+            content_type = response.headers.get("Content-Type", "")
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = {}
+            if not isinstance(error_body, dict):
+                error_body = {}
+            if error_body:
+                error_details = {
+                    "code": error_body.get("code"),
+                    "message": error_body.get("message"),
+                    "errors": error_body.get("errors"),
+                }
+                error_details = json.dumps(error_details, ensure_ascii=False, default=str)
+            else:
+                error_details = response.text
+            error_details = error_details.replace(interaction_token, "[REDACTED]")[:2000]
+            log_step(
+                interaction_id,
+                "Discord 錯誤詳情；"
+                f"content_type={content_type} "
+                f"body={error_details}",
+            )
+        response.raise_for_status()
+        log_step(interaction_id, "Discord follow-up 成功")
+        return
 
 def process_image_interaction(
     interaction_id: str,
@@ -380,6 +420,13 @@ def process_image_interaction(
             f"elapsed={time.perf_counter() - task_started_at:.2f}s "
             f"error_type={type(e).__name__}",
         )
+        if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 429:
+            log_step(
+                interaction_id,
+                "Discord 仍在限流；略過錯誤 follow-up，避免立即再送請求",
+            )
+            return
+
         try:
             error_payload = {"content": "❌ 處理圖片時發生內部錯誤，請稍後再試。"}
             send_followup(
