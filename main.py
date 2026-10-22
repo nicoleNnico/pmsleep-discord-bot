@@ -106,27 +106,37 @@ def verify_discord_signature(request_body: bytes, signature: str, timestamp: str
         print(f"簽章驗證發生未預期錯誤：{type(e).__name__}", flush=True)
         return False
 
-def find_image_in_drive(file_name: str, interaction_id: str):
-    """在指定的 Google Drive 資料夾搜尋檔案"""
-    query = f"'{GDRIVE_FOLDER_ID}' in parents and name = '{file_name}' and trashed = false"
-    log_step(interaction_id, f"Drive 搜尋：送出查詢；file_name={file_name}")
-    started_at = time.perf_counter()
-    try:
-        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    except Exception as e:
+def find_image_in_drive(file_stem: str, interaction_id: str):
+    """先在指定的 Google Drive 資料夾搜尋 PNG，再搜尋 JPG。"""
+    for extension in (".png", ".jpg"):
+        file_name = f"{file_stem}{extension}"
+        query = f"'{GDRIVE_FOLDER_ID}' in parents and name = '{file_name}' and trashed = false"
+        log_step(interaction_id, f"Drive 搜尋：送出查詢；file_name={file_name}")
+        started_at = time.perf_counter()
+        try:
+            results = drive_service.files().list(
+                q=query,
+                fields="files(id, name)",
+            ).execute()
+        except Exception as e:
+            log_step(
+                interaction_id,
+                f"Drive 搜尋失敗；file_name={file_name} "
+                f"elapsed={time.perf_counter() - started_at:.2f}s "
+                f"error_type={type(e).__name__}",
+            )
+            raise
+
+        files = results.get('files', [])
         log_step(
             interaction_id,
-            f"Drive 搜尋失敗；elapsed={time.perf_counter() - started_at:.2f}s "
-            f"error_type={type(e).__name__}",
+            f"Drive 搜尋完成；file_name={file_name} matches={len(files)} "
+            f"elapsed={time.perf_counter() - started_at:.2f}s",
         )
-        raise
-    files = results.get('files', [])
-    log_step(
-        interaction_id,
-        f"Drive 搜尋完成；matches={len(files)} "
-        f"elapsed={time.perf_counter() - started_at:.2f}s",
-    )
-    return files[0]['id'] if files else None
+        if files:
+            return files[0]['id'], file_name
+
+    return None
 
 def download_image_from_drive(file_id: str, local_path: str, interaction_id: str):
     """從 Google Drive 下載檔案到本地"""
@@ -214,7 +224,7 @@ def send_followup(
 
 def process_image_interaction(interaction_id: str, interaction_token: str, user_id: str, keyword: str):
     """
-    到 Google 雲端硬碟尋找對應的 .png 圖片。
+    到 Google 雲端硬碟先尋找對應的 .png，找不到再尋找 .jpg。
     如果找到：直接下載並回傳給使用者。
     如果找不到：直接回報雲端硬碟沒有該圖片，不會再進行額外生圖。
     """
@@ -225,17 +235,16 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
     # 處理中文或空白檔名
     log_step(interaction_id, f"輸入關鍵字：{keyword!r}")
     safe_filename = "".join([c for c in keyword if c.isalnum() or c.isspace()]).strip().replace(" ", "_")
-    file_name = f"{safe_filename}.png"
-    local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
-
-    log_step(interaction_id, f"檔名解析完成；file_name={file_name}")
+    log_step(interaction_id, f"檔名主體解析完成；file_stem={safe_filename}")
 
     stage = "Drive 搜尋"
     try:
-        file_id = find_image_in_drive(file_name, interaction_id)
+        image = find_image_in_drive(safe_filename, interaction_id)
 
-        if file_id:
-            log_step(interaction_id, "Drive 搜尋結果：找到符合檔案")
+        if image:
+            file_id, file_name = image
+            local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
+            log_step(interaction_id, f"Drive 搜尋結果：找到符合檔案；file_name={file_name}")
 
             stage = "Drive 下載"
             download_image_from_drive(file_id, local_path, interaction_id)
@@ -249,7 +258,8 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
                     f"Discord 上傳：開啟暫存圖片；exists={os.path.isfile(local_path)} "
                     f"bytes={os.path.getsize(local_path)}",
                 )
-                files = {"files[0]": (file_name, f, "image/png")}
+                mime_type = "image/png" if file_name.endswith(".png") else "image/jpeg"
+                files = {"files[0]": (file_name, f, mime_type)}
                 payload = {"content": content}
                 send_followup(
                     followup_url,
@@ -259,8 +269,13 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
                     files,
                 )
         else:
-            log_step(interaction_id, "Drive 搜尋結果：沒有符合檔案")
-            payload = {"content": f"❌ 抱歉，雲端硬碟中找不到檔名為 `{file_name}` 的圖片。"}
+            log_step(interaction_id, "Drive 搜尋結果：PNG 與 JPG 都沒有符合檔案")
+            payload = {
+                "content": (
+                    f"❌ 抱歉，雲端硬碟中找不到檔名為 "
+                    f"`{safe_filename}.png` 或 `{safe_filename}.jpg` 的圖片。"
+                )
+            }
             stage = "Discord 找不到檔案 follow-up"
             send_followup(
                 followup_url,
