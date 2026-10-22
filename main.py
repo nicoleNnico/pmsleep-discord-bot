@@ -138,6 +138,51 @@ def find_image_in_drive(file_stem: str, interaction_id: str):
 
     return None
 
+def log_drive_folder_contents(interaction_id: str):
+    """將指定 Google Drive 資料夾內所有項目名稱輸出至應用程式 logs。"""
+    query = f"'{GDRIVE_FOLDER_ID}' in parents and trashed = false"
+    page_token = None
+    file_count = 0
+    started_at = time.perf_counter()
+    log_step(interaction_id, "Drive 清單：開始列出資料夾內所有項目")
+
+    try:
+        while True:
+            results = drive_service.files().list(
+                q=query,
+                fields="nextPageToken, files(name, mimeType)",
+                pageSize=1000,
+                pageToken=page_token,
+            ).execute()
+            files = results.get("files", [])
+            for drive_file in files:
+                file_count += 1
+                log_step(
+                    interaction_id,
+                    f"Drive 清單項目 #{file_count}："
+                    f"name={drive_file.get('name', '<unnamed>')!r} "
+                    f"mimeType={drive_file.get('mimeType', '<unknown>')!r}",
+                )
+
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
+
+    except Exception as e:
+        log_step(
+            interaction_id,
+            f"Drive 清單列取失敗；列出項目數={file_count} "
+            f"elapsed={time.perf_counter() - started_at:.2f}s "
+            f"error_type={type(e).__name__}",
+        )
+        raise
+
+    log_step(
+        interaction_id,
+        f"Drive 清單列取完成；total={file_count} "
+        f"elapsed={time.perf_counter() - started_at:.2f}s",
+    )
+
 def download_image_from_drive(file_id: str, local_path: str, interaction_id: str):
     """從 Google Drive 下載檔案到本地"""
     log_step(interaction_id, "Drive 下載：建立媒體請求")
@@ -270,6 +315,8 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
                 )
         else:
             log_step(interaction_id, "Drive 搜尋結果：PNG 與 JPG 都沒有符合檔案")
+            stage = "Drive 資料夾清單"
+            log_drive_folder_contents(interaction_id)
             payload = {
                 "content": (
                     f"❌ 抱歉，雲端硬碟中找不到檔名為 "
