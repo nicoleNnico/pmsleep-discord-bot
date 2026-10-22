@@ -206,6 +206,33 @@ def download_image_from_drive(file_id: str, local_path: str, interaction_id: str
         f"elapsed={time.perf_counter() - started_at:.2f}s",
     )
 
+def ensure_image_extension(file_name: str, mime_type: str, interaction_id: str) -> str:
+    """若 Drive 檔名沒有副檔名，依 MIME type 補上常見圖片副檔名。"""
+    if os.path.splitext(file_name)[1]:
+        return file_name
+
+    extension_by_mime_type = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+        "image/tiff": ".tiff",
+        "image/svg+xml": ".svg",
+        "image/avif": ".avif",
+    }
+    extension = extension_by_mime_type.get(mime_type.lower())
+    if not extension:
+        raise ValueError(f"無法從圖片 MIME type 推斷副檔名：{mime_type}")
+
+    updated_name = f"{file_name}{extension}"
+    log_step(
+        interaction_id,
+        f"Drive 檔名沒有副檔名；依 MIME type 補上 {extension}，"
+        f"Discord 上傳檔名={updated_name!r}",
+    )
+    return updated_name
+
 # def upload_image_to_drive(local_path: str, file_name: str):
 #     """上傳本地圖片到 Google Drive"""
 #     file_metadata = {'name': file_name, 'parents': [GDRIVE_FOLDER_ID]}
@@ -273,7 +300,13 @@ def send_followup(
     response.raise_for_status()
     log_step(interaction_id, "Discord follow-up 成功")
 
-def process_image_interaction(interaction_id: str, interaction_token: str, user_id: str, keyword: str):
+def process_image_interaction(
+    interaction_id: str,
+    application_id: str,
+    interaction_token: str,
+    user_id: str,
+    keyword: str,
+):
     """
     到 Google 雲端硬碟依檔名主體尋找圖片，不比對副檔名。
     如果找到：直接下載並回傳給使用者。
@@ -281,7 +314,8 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
     """
     task_started_at = time.perf_counter()
     log_step(interaction_id, "背景工作已啟動")
-    followup_url = f"https://discord.com/api/v10/webhooks/{DISCORD_APP_ID}/{interaction_token}"
+    followup_url = f"https://discord.com/api/v10/webhooks/{application_id}/{interaction_token}"
+    log_step(interaction_id, f"Follow-up webhook 已建立；application_id_present={bool(application_id)}")
     
     # 處理中文或空白檔名
     log_step(interaction_id, f"輸入關鍵字：{keyword!r}")
@@ -294,6 +328,7 @@ def process_image_interaction(interaction_id: str, interaction_token: str, user_
 
         if image:
             file_id, file_name, mime_type = image
+            file_name = ensure_image_extension(file_name, mime_type, interaction_id)
             local_path = os.path.join(LOCAL_TEMP_DIR, file_name)
             log_step(interaction_id, f"Drive 搜尋結果：找到符合檔案；file_name={file_name}")
 
@@ -414,17 +449,30 @@ async def discord_interactions(request: Request, background_tasks: BackgroundTas
                 log_step(interaction_id, f"指令選項解析完成；keyword={keyword!r}")
                 
                 interaction_token = data["token"]
+                application_id = DISCORD_APP_ID
                 user_id = data.get("member", {}).get("user", {}).get("id") or data.get("user", {}).get("id")
                 log_step(
                     interaction_id,
                     f"回覆資料準備完成；user_id_present={bool(user_id)} "
-                    f"token_present={bool(interaction_token)}",
+                    f"token_present={bool(interaction_token)} "
+                    f"application_id_present={bool(application_id)}",
                 )
+
+                if not application_id:
+                    log_step(
+                        interaction_id,
+                        "無法排程背景工作：DISCORD_APP_ID 環境變數未設定",
+                    )
+                    return JSONResponse(
+                        {"error": "Missing Discord application ID"},
+                        status_code=500,
+                    )
 
                 log_step(interaction_id, "開始排程背景工作")
                 background_tasks.add_task(
                     process_image_interaction,
                     interaction_id,
+                    application_id,
                     interaction_token,
                     user_id,
                     keyword,
