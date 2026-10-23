@@ -1,13 +1,13 @@
 {
-  "主技能": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/主技能.webp",
-  "副技能": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/副技能.webp",
-  "性格": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/性格.webp",
-  "料理": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/料理.webp",
-  "睡姿": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/睡姿.webp",
-  "研究等級": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/研究等級.webp",
+  "主技能": "https://media.discordapp.net/attachments/1201876002234437632/1563082910137974824/f9eb749b8a61e11b.webp?ex=6adc55e6&is=6adb0466&hm=f428ce3bff2a65232ab57cb6fc8d70ecee7ef6caedf0dee40325cf32450eb57b&=&format=webp",
+  "副技能": "https://media.discordapp.net/attachments/1201876002234437632/1563082912851697764/e52646dbd7312a19.webp?ex=6adc55e7&is=6adb0467&hm=305a811d8d20bdc29df366b608bd395e1a9ef181be3d6458253d1c8394b7913a&=&format=webp",
+  "性格": "https://media.discordapp.net/attachments/1201876002234437632/1563082911673094154/4103fbdee6db0447.webp?ex=6adc55e6&is=6adb0466&hm=37b664d022c9d9082e8eb04773feedfa6860ffeb5968ac94536b946749acb6b2&=&format=webp",
+  "睡姿": "https://media.discordapp.net/attachments/1201876002234437632/1563082913665257533/3c850e0ddbdda816.webp?ex=6adc55e7&is=6adb0467&hm=55ec5b6be969c6ac3a469cc5d716837429379948cdeff41a1275c01f907972f9&=&format=webp",
+  "研究等級": "https://media.discordapp.net/attachments/1201876002234437632/1563082912046383164/ea85021bcc197851.webp?ex=6adc55e6&is=6adb0466&hm=cb82185953681f797c18bce63156516a6a14e75b52c29a0191a49c905252c3c5&=&format=webp",
+  "料理": "https://media.discordapp.net/attachments/1201876002234437632/1563082912448913498/b80d62462b16e20f.webp?ex=6adc55e7&is=6adb0467&hm=437c4090cd840f1e0a15b2ce7875e7ee02326f1372eaa1a47252a9c0207610dc&=&format=webp",
 
-  "甜點": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/甜點.webp",
-  "咖哩": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/咖哩.webp",
-  "沙拉": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/沙拉.webp"
+  "甜點": "https://media.discordapp.net/attachments/1201876002234437632/1563082913245831208/047350fdf1adf25a.png?ex=6adc55e7&is=6adb0467&hm=f7c5adceaccc2ad75d9ac9675403d3d4ba7c1a650e11dfc95d86f6a377e462fd&=&format=webp&quality=lossless&width=1280&height=832",
+  "咖哩": "https://media.discordapp.net/attachments/1201876002234437632/1563082911320641577/190901c69b8f6d17.png?ex=6adc55e6&is=6adb0466&hm=eb1443810c6ea123e631ab07f77383f29f46d4a47727cd12094a6daf7e33fc1f&=&format=webp&quality=lossless",
+  "沙拉": "https://media.discordapp.net/attachments/1201876002234437632/1563082910850875412/848474debf9d40e4.png?ex=6adc55e6&is=6adb0466&hm=2cfa771eab3f639f291aa368a4fafeb23aa7fb1e5365919d48f1303095f1cb11&=&format=webp&quality=lossless&width=1280&height=798"
 }
 

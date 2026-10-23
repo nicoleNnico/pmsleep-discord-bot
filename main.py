@@ -38,6 +38,9 @@ for keyword, image_url in image_url_entries.items():
     IMAGE_URLS[keyword] = image_url
 
 FOOD_CAROUSEL = ("沙拉", "咖哩", "甜點")
+FOOD_CAROUSEL_INDEX = {
+    keyword: index for index, keyword in enumerate(FOOD_CAROUSEL)
+}
 if any(keyword not in IMAGE_URLS for keyword in FOOD_CAROUSEL):
     raise ValueError("料理輪播需要 image_urls.json 包含：沙拉、咖哩、甜點")
 
@@ -251,8 +254,12 @@ async def discord_interactions(request: Request):
                         "data": {"content": "等一下啦"},
                     })
 
-                if command_name in ["甜點", "咖哩", "沙拉"]:
-                    carousel_index = FOOD_CAROUSEL.index(command_name)
+                if command_name in FOOD_CAROUSEL_INDEX:
+                    carousel_index = FOOD_CAROUSEL_INDEX[command_name]
+                    log_step(
+                        interaction_id,
+                        f"料理輪播初始頁；command={command_name} index={carousel_index}",
+                    )
                     return JSONResponse({
                         "type": 4,
                         "data": {
@@ -276,19 +283,25 @@ async def discord_interactions(request: Request):
                     if character.isalnum() or character.isspace()
                 ).strip().replace(" ", "_")
                 image_url = IMAGE_URLS.get(safe_keyword)
-                content = image_url or f"❌ 找不到關鍵字為 `{safe_keyword}` 的圖片網址。"
+                if image_url is None:
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": f"❌ 找不到關鍵字為 `{safe_keyword}` 的圖片網址。",
+                        },
+                    })
                 log_step(
                     interaction_id,
-                    f"圖片網址查找完成；keyword={safe_keyword!r} found={image_url is not None}",
+                    f"圖片 CDN 網址查找完成；keyword={safe_keyword!r}",
                 )
                 log_step(
                     interaction_id,
-                    f"直接回覆 Slash Command；type=4 "
+                    f"直接回覆圖片 CDN 網址；type=4 "
                     f"elapsed={time.perf_counter() - request_started_at:.3f}s",
                 )
                 return JSONResponse({
                     "type": 4,
-                    "data": {"content": content},
+                    "data": {"content": image_url},
                 })
 
         log_step(interaction_id, f"不支援的互動；type={interaction_type} command={command_name}")
