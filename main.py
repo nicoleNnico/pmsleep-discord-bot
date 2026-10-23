@@ -251,7 +251,7 @@ async def discord_interactions(request: Request):
                         "data": {"content": "等一下啦"},
                     })
 
-                if command_name == "咖哩":
+                if command_name in ["甜點", "咖哩", "沙拉"]:
                     carousel_index = FOOD_CAROUSEL.index("咖哩")
                     return JSONResponse({
                         "type": 4,
