@@ -35,7 +35,7 @@ commands = [
     *(
         {
             "name": keyword,
-            "description": f"回傳{keyword}圖片網址",
+            "description": f"指令送出後，機器人會回傳{keyword}的資訊圖表",
         }
         for keyword in image_urls
     ),
