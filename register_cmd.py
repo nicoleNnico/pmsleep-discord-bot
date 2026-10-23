@@ -30,13 +30,7 @@ with image_urls_path.open(encoding="utf-8") as config_file:
 if not isinstance(image_urls, dict):
     raise ValueError(f"圖片網址清單必須是 JSON object：{image_urls_path}")
 
-# 清除全域指令
-# 後面的程式碼會重新註冊新的指令, 所以這裡先清除舊的指令.
-url_global = f"https://discord.com/api/v10/applications/{DISCORD_APP_ID}/commands"
-response_global = requests.put(url_global, headers=headers, json=[])
-print("清除全域指令狀態：", response_global.status_code)
-
-# 先打好註冊新的指令
+# Discord Bulk Overwrite 一次建立完整的全域指令清單。
 commands = [
     *(
         {
@@ -61,9 +55,23 @@ commands = [
     }
 ]
 
-# 把上面的指令註冊到 Discord
-for command in commands:
-    response = requests.post(url, json=command, headers=headers)
-    print(f"Command: {command['name']}")
-    print("Status Code:", response.status_code)
-    print("Response:", response.json())
+response = requests.put(url, json=commands, headers=headers, timeout=15)
+print("Bulk overwrite status code:", response.status_code)
+try:
+    response_body = response.json()
+except ValueError:
+    response_body = response.text
+
+if not response.ok:
+    print("Discord API error:", response_body)
+    response.raise_for_status()
+
+registered_commands = response_body
+if not isinstance(registered_commands, list):
+    raise RuntimeError(f"Discord 回傳非預期的指令清單：{response_body!r}")
+
+print("Registered commands:", ", ".join(
+    command.get("name", "<unnamed>")
+    for command in registered_commands
+    if isinstance(command, dict)
+))

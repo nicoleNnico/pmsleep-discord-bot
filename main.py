@@ -37,6 +37,10 @@ for keyword, image_url in image_url_entries.items():
         raise ValueError(f"圖片網址必須是 HTTPS URL：{keyword!r}")
     IMAGE_URLS[keyword] = image_url
 
+FOOD_CAROUSEL = ("沙拉", "咖哩", "甜點")
+if any(keyword not in IMAGE_URLS for keyword in FOOD_CAROUSEL):
+    raise ValueError("料理輪播需要 image_urls.json 包含：沙拉、咖哩、甜點")
+
 COMMAND_COOLDOWN_SECONDS = 1.0
 last_command_received_at = None
 
@@ -52,6 +56,35 @@ def is_command_rate_limited() -> bool:
         return True
     last_command_received_at = now
     return False
+
+def build_food_carousel_embed(index: int) -> dict:
+    keyword = FOOD_CAROUSEL[index]
+    return {
+        "title": keyword,
+        "image": {"url": IMAGE_URLS[keyword]},
+        "footer": {"text": f"{index + 1} / {len(FOOD_CAROUSEL)}"},
+    }
+
+def build_food_carousel_components(index: int) -> list:
+    previous_index = (index - 1) % len(FOOD_CAROUSEL)
+    next_index = (index + 1) % len(FOOD_CAROUSEL)
+    return [{
+        "type": 1,
+        "components": [
+            {
+                "type": 2,
+                "style": 2,
+                "label": "上一張",
+                "custom_id": f"food_carousel:{previous_index}",
+            },
+            {
+                "type": 2,
+                "style": 2,
+                "label": "下一張",
+                "custom_id": f"food_carousel:{next_index}",
+            },
+        ],
+    }]
 
 def verify_discord_signature(request_body: bytes, signature: str, timestamp: str) -> bool:
     """驗證 Discord Webhook 請求簽章"""
@@ -132,6 +165,31 @@ async def discord_interactions(request: Request):
             log_step(interaction_id, "收到 PING；準備回覆 PONG")
             return JSONResponse({"type": 1})
 
+        if data.get("type") == 3:
+            custom_id = data.get("data", {}).get("custom_id", "")
+            if custom_id.startswith("food_carousel:"):
+                try:
+                    index = int(custom_id.partition(":")[2])
+                except ValueError:
+                    index = -1
+                if not 0 <= index < len(FOOD_CAROUSEL):
+                    log_step(interaction_id, f"無效的料理輪播按鈕；custom_id={custom_id!r}")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {"content": "❌ 這個輪播按鈕已失效。", "flags": 64},
+                    })
+
+                return JSONResponse({
+                    "type": 7,
+                    "data": {
+                        "embeds": [build_food_carousel_embed(index)],
+                        "components": build_food_carousel_components(index),
+                    },
+                })
+
+            log_step(interaction_id, f"不支援的按鈕互動；custom_id={custom_id!r}")
+            return JSONResponse({"type": 4, "data": {"content": "❌ 不支援的按鈕。", "flags": 64}})
+
         # 2. 處理 Slash Command
         if data.get("type") == 2:
             command_name = data["data"]["name"]
@@ -191,6 +249,16 @@ async def discord_interactions(request: Request):
                     return JSONResponse({
                         "type": 4,
                         "data": {"content": "等一下啦"},
+                    })
+
+                if command_name == "咖哩":
+                    carousel_index = FOOD_CAROUSEL.index("咖哩")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "embeds": [build_food_carousel_embed(carousel_index)],
+                            "components": build_food_carousel_components(carousel_index),
+                        },
                     })
 
                 if command_name == "nico":
