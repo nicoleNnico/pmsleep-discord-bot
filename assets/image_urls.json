@@ -1,12 +1,13 @@
 {
-  "主技能": "https://images-ext-1.discordapp.net/external/Lqna-llco3mCP1-JOmzdWOKdmdfLCgoRgwEzOYjP6rc/https/i.urusai.cc/5nQ2O.png?format=webp&quality=lossless&width=822&height=1024",
-  "副技能": "https://images-ext-1.discordapp.net/external/73TsET7cUqqCeLsGs5-guIwCpupqV7Yju6rFg9cqtVs/https/i.imgur.com/6SSkxfi.png?format=webp&quality=lossless",
-  "性格": "https://media.discordapp.net/attachments/1191930242353348710/1562844491285659678/64cac09c5d32d4d1.jpg?ex=6adb77da&is=6ada265a&hm=117d3263b2c8b038ac439c10d6d40f97e0e890ed0b5fb036ca1aaf11a20d421a&=&format=webp",
-  "料理": "https://images-ext-1.discordapp.net/external/2Umjs8uonDVI2hRIZRHmfZMwE0EqvAGeW0oUR_dg_m4/https/i.imgur.com/SOgL00x.png?format=webp&quality=lossless",
-  "睡姿": "https://images-ext-1.discordapp.net/external/TyJqb5zpgK0slr64EO_En8WGtdcBdyHr5xUlBBIO2p0/https/i.urusai.cc/KhHra.png?format=webp&quality=lossless&width=791&height=1024",
-  "研究等級": "https://images-ext-1.discordapp.net/external/-zTHMYI-4cQ16dUtAKzdaUrt84_mi17gfK677piapro/https/i.meee.com.tw/tmiOYEw.png?format=webp&quality=lossless",
+  "主技能": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/主技能.webp",
+  "副技能": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/副技能.webp",
+  "性格": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/性格.webp",
+  "料理": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/料理.webp",
+  "睡姿": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/睡姿.webp",
+  "研究等級": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/研究等級.webp",
 
-  "甜點": "https://media.discordapp.net/attachments/1200713690790506626/1563000673329741944/e02daf77e38a7cb6.png?ex=6adc094f&is=6adab7cf&hm=54c979e9c6240d0bd15619895b57e0e1850cfffae2171cba23dcca7413f206dd&=&format=webp&quality=lossless&width=1280&height=832",
-  "咖哩": "https://media.discordapp.net/attachments/1200713690790506626/1563000672838754304/a58ad433d51256b7.png?ex=6adc094f&is=6adab7cf&hm=8c7e9d67ea42e9e749cf357ba99ee4a1157974541c7ad26052d180ab4485a423&=&format=webp&quality=lossless",
-  "沙拉": "https://media.discordapp.net/attachments/1200713690790506626/1563000672226377809/4c9031a8c9cb46f2.png?ex=6adc094f&is=6adab7cf&hm=b58b7cd4431493f5bfc8e11a1b4c2a5dc8fadc65b72884de48013fc5ebf584be&=&format=webp&quality=lossless&width=1280&height=798"
+  "甜點": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/甜點.webp",
+  "咖哩": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/咖哩.webp",
+  "沙拉": "https://cdn.jsdelivr.net/gh/nicoleNnico/pmsleep-discord-bot@dev/assets/images/沙拉.webp"
 }
+
