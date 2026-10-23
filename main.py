@@ -1,3 +1,7 @@
+# 這是一個 Pokemon Sleep 群組的 Discord Bot.
+# 角色設定: 群主(妮可)買的機器人, 是一隻多邊獸(porygon), 具有廉價網軍感.
+# 主要功能: 回覆遊戲相關的 infographic 網址, 方便成員據此討論遊戲攻略.
+
 import os
 import json
 import time
@@ -136,8 +140,56 @@ async def discord_interactions(request: Request):
         if data.get("type") == 2:
             command_name = data["data"]["name"]
             log_step(interaction_id, f"進入 Slash Command 分支；command={command_name}")
+
+            if command_name == "echo":
+                member = data.get("member") or {}
+                member_permissions = member.get("permissions")
+                try:
+                    is_administrator = (
+                        member_permissions is not None
+                        and (int(member_permissions) & 8) == 8
+                    )
+                except (TypeError, ValueError):
+                    is_administrator = False
+
+                if not is_administrator:
+                    log_step(interaction_id, "拒絕 /echo；使用者沒有權限使用此指令")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 只有妮可可以使用這個指令。欸嘿 (ゝω・)╭☆",
+                            "flags": 64,
+                        },
+                    })
+
+                options = data["data"].get("options", [])
+                echo_text = next(
+                    (option.get("value") for option in options if option.get("name") == "text"),
+                    None,
+                )
+                if not isinstance(echo_text, str) or not echo_text.strip():
+                    log_step(interaction_id, "/echo 缺少有效文字")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 請輸入要發送的文字。",
+                            "flags": 64,
+                        },
+                    })
+
+                log_step(interaction_id, f"/echo 發送文字；length={len(echo_text)}")
+                return JSONResponse({
+                    "type": 4,
+                    "data": {
+                        "content": echo_text,
+                        "allowed_mentions": {
+                            "parse": [],
+                            "replied_user": False,
+                        },
+                    },
+                })
             
-            if command_name in ("nico", "性格"):
+            if command_name in IMAGE_URLS or command_name == "nico":
                 if is_command_rate_limited():
                     log_step(interaction_id, "指令過於頻繁；回覆「等一下啦」")
                     return JSONResponse({
@@ -145,15 +197,15 @@ async def discord_interactions(request: Request):
                         "data": {"content": "等一下啦"},
                     })
 
-                if command_name == "性格":
-                    keyword = "性格"
-                else:
+                if command_name == "nico":
                     log_step(interaction_id, "開始解析指令選項")
                     options = data["data"].get("options", [])
                     keyword = next(
                         (opt["value"] for opt in options if opt["name"] == "keyword"),
                         "性格",
                     )
+                else:
+                    keyword = command_name
                 log_step(interaction_id, f"指令選項解析完成；keyword={keyword!r}")
                 safe_keyword = "".join(
                     character for character in keyword
@@ -190,3 +242,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+    # dicsord startup command: 
+    # uvicorn main:app --host 0.0.0.0 --port $PORT
