@@ -36,7 +36,7 @@ url_global = f"https://discord.com/api/v10/applications/{DISCORD_APP_ID}/command
 response_global = requests.put(url_global, headers=headers, json=[])
 print("清除全域指令狀態：", response_global.status_code)
 
-
+# 先打好註冊新的指令
 commands = [
     *(
         {
@@ -61,6 +61,7 @@ commands = [
     }
 ]
 
+# 把上面的指令註冊到 Discord
 for command in commands:
     response = requests.post(url, json=command, headers=headers)
     print(f"Command: {command['name']}")

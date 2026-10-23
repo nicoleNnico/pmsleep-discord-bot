@@ -1,7 +1,3 @@
-# 這是一個 Pokemon Sleep 群組的 Discord Bot.
-# 角色設定: 群主(妮可)買的機器人, 是一隻多邊獸(porygon), 具有廉價網軍感.
-# 主要功能: 回覆遊戲相關的 infographic 網址, 方便成員據此討論遊戲攻略.
-
 import os
 import json
 import time
