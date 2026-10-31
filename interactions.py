@@ -7,9 +7,12 @@ import requests
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from config import DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY
+from config import DISCORD_APP_ID, DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY
 from discord_security import verify_discord_signature
-from discord_messages import send_channel_message
+from discord_messages import (
+    delete_original_interaction_response,
+    send_channel_message,
+)
 from image_commands import (
     FOOD_CAROUSEL,
     FOOD_CAROUSEL_INDEX,
@@ -45,6 +48,7 @@ def send_echo_message(
     token: str,
     channel_id: str,
     content: str,
+    interaction_token: str,
 ) -> None:
     try:
         send_channel_message(token, channel_id, content)
@@ -55,6 +59,16 @@ def send_echo_message(
         )
         raise
     log_step(interaction_id, "/echo 獨立訊息已發送")
+    time.sleep(3)
+    try:
+        delete_original_interaction_response(DISCORD_APP_ID, interaction_token)
+    except requests.RequestException as error:
+        log_step(
+            interaction_id,
+            f"/echo 私密確認訊息自動刪除失敗；error_type={type(error).__name__}",
+        )
+        raise
+    log_step(interaction_id, "/echo 私密確認訊息已自動刪除")
 
 
 @router.get("/")
@@ -215,25 +229,46 @@ async def discord_interactions(
                         },
                     })
 
+                interaction_token = data.get("token")
+                if not isinstance(interaction_token, str) or not interaction_token:
+                    log_step(interaction_id, "/echo 缺少互動 token")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 找不到刪除確認訊息所需的互動資訊。",
+                            "flags": 64,
+                        },
+                    })
+                if not DISCORD_APP_ID:
+                    log_step(interaction_id, "/echo 缺少 DISCORD_APP_ID")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 確認訊息自動刪除功能尚未設定。",
+                            "flags": 64,
+                        },
+                    })
+
                 background_tasks.add_task(
                     send_echo_message,
                     interaction_id,
                     token,
                     channel_id,
                     echo_text,
+                    interaction_token,
                 )
                 log_step(interaction_id, f"/echo 排入獨立訊息；length={len(echo_text)}")
                 return JSONResponse({
                     "type": 4,
                     "data": {
-                        "content": "收到，機器人會另外發一則訊息。",
+                        "content": "收到，機器人會另外發一則訊息；確認訊息 3 秒後自動刪除。",
                         "flags": 64,
                     },
                 })
 
             if command_name == "廢文":
                 post = random.choice(waste_posts)
-                log_step(interaction_id, "多邊獸也會發廢文喔～")
+                log_step(interaction_id, "多邊獸發廢文")
                 return JSONResponse({
                     "type": 4,
                     "data": {"content": post},
