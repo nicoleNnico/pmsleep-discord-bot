@@ -1,11 +1,15 @@
 import json
 import os
+from pathlib import Path
+import random
 import time
 
-from fastapi import APIRouter, Request
+import requests
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from discord_security import verify_discord_signature
+from discord_messages import send_channel_message
 from image_commands import (
     FOOD_CAROUSEL,
     FOOD_CAROUSEL_INDEX,
@@ -18,9 +22,40 @@ from image_commands import (
 
 router = APIRouter()
 
+WASTE_POSTS_PATH = (
+    Path(__file__).resolve().parent / "assets" / "porygon_waste_posts.json"
+)
+with WASTE_POSTS_PATH.open(encoding="utf-8") as posts_file:
+    waste_posts = json.load(posts_file)
+if (
+    not isinstance(waste_posts, list)
+    or not waste_posts
+    or any(not isinstance(post, str) or not post.strip() for post in waste_posts)
+):
+    raise ValueError(
+        f"多邊獸自嘲廢文必須是非空字串清單：{WASTE_POSTS_PATH}"
+    )
+
 
 def log_step(interaction_id: str, message: str) -> None:
     print(f"[interaction_id={interaction_id}] {message}", flush=True)
+
+
+def send_echo_message(
+    interaction_id: str,
+    token: str,
+    channel_id: str,
+    content: str,
+) -> None:
+    try:
+        send_channel_message(token, channel_id, content)
+    except (requests.RequestException, RuntimeError) as error:
+        log_step(
+            interaction_id,
+            f"/echo 獨立訊息發送失敗；error_type={type(error).__name__}",
+        )
+        raise
+    log_step(interaction_id, "/echo 獨立訊息已發送")
 
 
 @router.get("/")
@@ -31,7 +66,10 @@ def home():
 
 
 @router.post("/interactions")
-async def discord_interactions(request: Request):
+async def discord_interactions(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     """Discord Webhook 接收主入口"""
     request_started_at = time.perf_counter()
     log_step("pending", f"HTTP 請求進入；method={request.method} path={request.url.path}")
@@ -157,19 +195,52 @@ async def discord_interactions(request: Request):
                         },
                     })
 
-                log_step(interaction_id, f"/echo 發送文字；length={len(echo_text)}")
+                channel_id = data.get("channel_id")
+                token = os.environ.get("DISCORD_BOT_TOKEN")
+                if not isinstance(channel_id, str) or not channel_id.isdecimal():
+                    log_step(interaction_id, "/echo 缺少有效頻道 ID")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 找不到要發送的頻道。",
+                            "flags": 64,
+                        },
+                    })
+                if not token:
+                    log_step(interaction_id, "/echo 缺少 DISCORD_BOT_TOKEN")
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 機器人的獨立發送功能尚未設定。",
+                            "flags": 64,
+                        },
+                    })
+
+                background_tasks.add_task(
+                    send_echo_message,
+                    interaction_id,
+                    token,
+                    channel_id,
+                    echo_text,
+                )
+                log_step(interaction_id, f"/echo 排入獨立訊息；length={len(echo_text)}")
                 return JSONResponse({
                     "type": 4,
                     "data": {
-                        "content": echo_text,
-                        "allowed_mentions": {
-                            "parse": [],
-                            "replied_user": False,
-                        },
+                        "content": "收到，機器人會另外發一則訊息。",
+                        "flags": 64,
                     },
                 })
 
-            if command_name in IMAGE_URLS or command_name == "nico":
+            if command_name == "廢文":
+                post = random.choice(waste_posts)
+                log_step(interaction_id, "多邊獸也會發廢文喔～")
+                return JSONResponse({
+                    "type": 4,
+                    "data": {"content": post},
+                })
+
+            if command_name in IMAGE_URLS:
                 if is_command_rate_limited():
                     log_step(interaction_id, "指令過於頻繁；回覆「等一下啦」")
                     return JSONResponse({
@@ -196,19 +267,7 @@ async def discord_interactions(request: Request):
                         },
                     })
 
-                if command_name == "nico":
-                    log_step(interaction_id, "開始解析指令選項")
-                    options = data["data"].get("options", [])
-                    keyword = next(
-                        (
-                            option["value"]
-                            for option in options
-                            if option["name"] == "keyword"
-                        ),
-                        "性格",
-                    )
-                else:
-                    keyword = command_name
+                keyword = command_name
                 log_step(
                     interaction_id,
                     f"指令選項解析完成；keyword={keyword!r}",
@@ -252,6 +311,12 @@ async def discord_interactions(request: Request):
             status_code=400,
         )
 
+    except HTTPException as error:
+        return JSONResponse(
+            {"detail": error.detail},
+            status_code=error.status_code,
+            headers=error.headers,
+        )
     except Exception as error:
         log_step(
             "pending",

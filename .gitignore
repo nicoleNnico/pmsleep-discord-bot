@@ -13,8 +13,6 @@ __pycache__/
 temp_images/
 credentials.json
 .env
-.scheduled_messages_state.json
-.scheduled_messages_state.tmp
 
 # 虛擬環境
 venv/

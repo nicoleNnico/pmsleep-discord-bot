@@ -40,8 +40,12 @@ commands = [
         for keyword in image_urls
     ),
     {
+        "name": "廢文",
+        "description": "看看多邊獸今天又準備了什麼自嘲廢文",
+    },
+    {
         "name": "echo",
-        "description": "讓機器人在群組中發送指定文字",
+        "description": "讓機器人獨立發送指定文字，不公開指令內容",
         "default_member_permissions": "8",
         "options": [
             {
