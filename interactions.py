@@ -60,9 +60,24 @@ async def delete_echo_confirmation(
             interaction_token,
         )
     except requests.RequestException as error:
+        response = error.response
+        discord_code = None
+        discord_message = None
+        if response is not None:
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = None
+            if isinstance(error_body, dict):
+                discord_code = error_body.get("code")
+                discord_message = error_body.get("message")
         log_step(
             interaction_id,
-            f"/echo 私密確認訊息自動刪除失敗；error_type={type(error).__name__}",
+            "/echo 私密確認訊息自動刪除失敗；"
+            f"error_type={type(error).__name__} "
+            f"status={response.status_code if response is not None else 'unknown'} "
+            f"discord_code={discord_code!r} "
+            f"discord_message={discord_message!r}",
         )
         return
     log_step(interaction_id, "/echo 私密確認訊息已自動刪除")
