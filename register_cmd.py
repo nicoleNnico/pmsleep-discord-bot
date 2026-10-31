@@ -36,11 +36,16 @@ commands = [
     ),
     {
         "name": "廢文",
-        "description": "看看多邊獸今天會發什麼廢文",
+        "description": "叫妮可買的機器人發廢文",
+    },
+    {
+        "name": "live",
+        "description": "檢查機器人是否正常運作",
+        "default_member_permissions": "8",
     },
     {
         "name": "echo",
-        "description": "讓機器人獨立發送指定文字，不公開指令內容",
+        "description": "讓機器人獨立發送指定文字",
         "default_member_permissions": "8",
         "options": [
             {

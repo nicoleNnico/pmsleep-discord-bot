@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 import random
@@ -11,6 +12,7 @@ from config import DISCORD_APP_ID, DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY
 from discord_security import verify_discord_signature
 from discord_messages import (
     delete_original_interaction_response,
+    edit_original_interaction_response,
     send_channel_message,
 )
 from image_commands import (
@@ -23,6 +25,8 @@ from image_commands import (
 )
 
 router = APIRouter()
+ECHO_CONFIRMATION_DELETE_DELAY_SECONDS = 3
+pending_echo_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 WASTE_POSTS_PATH = (
     Path(__file__).resolve().parent / "assets" / "porygon_waste_posts.json"
@@ -43,6 +47,27 @@ def log_step(interaction_id: str, message: str) -> None:
     print(f"[interaction_id={interaction_id}] {message}", flush=True)
 
 
+async def delete_echo_confirmation(
+    interaction_id: str,
+    application_id: str,
+    interaction_token: str,
+) -> None:
+    await asyncio.sleep(ECHO_CONFIRMATION_DELETE_DELAY_SECONDS)
+    try:
+        await asyncio.to_thread(
+            delete_original_interaction_response,
+            application_id,
+            interaction_token,
+        )
+    except requests.RequestException as error:
+        log_step(
+            interaction_id,
+            f"/echo 私密確認訊息自動刪除失敗；error_type={type(error).__name__}",
+        )
+        return
+    log_step(interaction_id, "/echo 私密確認訊息已自動刪除")
+
+
 def send_echo_message(
     interaction_id: str,
     token: str,
@@ -52,6 +77,43 @@ def send_echo_message(
 ) -> None:
     try:
         send_channel_message(token, channel_id, content)
+    except requests.HTTPError as error:
+        response = error.response
+        discord_code = None
+        discord_message = None
+        if response is not None:
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = None
+            if isinstance(error_body, dict):
+                discord_code = error_body.get("code")
+                discord_message = error_body.get("message")
+        log_step(
+            interaction_id,
+            "/echo 獨立訊息發送失敗；"
+            f"status={response.status_code if response is not None else 'unknown'} "
+            f"discord_code={discord_code!r} "
+            f"discord_message={discord_message!r}",
+        )
+        failure_message = (
+            "❌ 機器人無法在這個頻道發送訊息，請確認頻道權限。"
+            if response is not None and response.status_code == 403
+            else "❌ 機器人發送訊息失敗，請稍後再試。"
+        )
+        try:
+            edit_original_interaction_response(
+                DISCORD_APP_ID,
+                interaction_token,
+                failure_message,
+            )
+        except requests.RequestException as edit_error:
+            log_step(
+                interaction_id,
+                "/echo 私密失敗提示更新失敗；"
+                f"error_type={type(edit_error).__name__}",
+            )
+        return
     except (requests.RequestException, RuntimeError) as error:
         log_step(
             interaction_id,
@@ -59,16 +121,6 @@ def send_echo_message(
         )
         raise
     log_step(interaction_id, "/echo 獨立訊息已發送")
-    time.sleep(3)
-    try:
-        delete_original_interaction_response(DISCORD_APP_ID, interaction_token)
-    except requests.RequestException as error:
-        log_step(
-            interaction_id,
-            f"/echo 私密確認訊息自動刪除失敗；error_type={type(error).__name__}",
-        )
-        raise
-    log_step(interaction_id, "/echo 私密確認訊息已自動刪除")
 
 
 @router.get("/")
@@ -165,6 +217,36 @@ async def discord_interactions(
                 f"進入 Slash Command 分支；command={command_name}",
             )
 
+            if command_name == "live":
+                member = data.get("member") or {}
+                member_permissions = member.get("permissions")
+                try:
+                    is_administrator = (
+                        member_permissions is not None
+                        and (int(member_permissions) & 8) == 8
+                    )
+                except (TypeError, ValueError):
+                    is_administrator = False
+
+                if not is_administrator:
+                    log_step(
+                        interaction_id,
+                        "拒絕 /live；使用者沒有管理員權限",
+                    )
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 只有管理員可以使用這個指令。",
+                            "flags": 64,
+                        },
+                    })
+
+                log_step(interaction_id, "/live 檢查成功")
+                return JSONResponse({
+                    "type": 4,
+                    "data": {"content": "live"},
+                })
+
             if command_name == "echo":
                 member = data.get("member") or {}
                 member_permissions = member.get("permissions")
@@ -249,6 +331,16 @@ async def discord_interactions(
                         },
                     })
 
+                cleanup_task = asyncio.create_task(
+                    delete_echo_confirmation(
+                        interaction_id,
+                        DISCORD_APP_ID,
+                        interaction_token,
+                    ),
+                    name=f"echo-cleanup-{interaction_id}",
+                )
+                pending_echo_cleanup_tasks.add(cleanup_task)
+                cleanup_task.add_done_callback(pending_echo_cleanup_tasks.discard)
                 background_tasks.add_task(
                     send_echo_message,
                     interaction_id,
@@ -261,7 +353,7 @@ async def discord_interactions(
                 return JSONResponse({
                     "type": 4,
                     "data": {
-                        "content": "收到，機器人會另外發一則訊息；確認訊息 3 秒後自動刪除。",
+                        "content": "收到，機器人會另外發一則訊息；此訊息 3 秒後自動刪除。",
                         "flags": 64,
                     },
                 })

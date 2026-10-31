@@ -1,6 +1,8 @@
 import logging
 import math
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -35,10 +37,7 @@ def send_channel_message(token: str, channel_id: str, content: str) -> None:
         )
         if not _is_valid_retry_after(retry_after):
             retry_after_header = response.headers.get("Retry-After")
-            try:
-                header_retry_after = float(retry_after_header)
-            except (TypeError, ValueError):
-                header_retry_after = None
+            header_retry_after = _parse_retry_after_header(retry_after_header)
 
             if _is_valid_retry_after(header_retry_after):
                 logger.warning(
@@ -73,6 +72,19 @@ def delete_original_interaction_response(
     response.raise_for_status()
 
 
+def edit_original_interaction_response(
+    application_id: str,
+    interaction_token: str,
+    content: str,
+) -> None:
+    url = (
+        f"{DISCORD_API_URL}/webhooks/{application_id}/"
+        f"{interaction_token}/messages/@original"
+    )
+    response = requests.patch(url, json={"content": content}, timeout=15)
+    response.raise_for_status()
+
+
 def _is_valid_retry_after(value: object) -> bool:
     return (
         isinstance(value, (int, float))
@@ -80,3 +92,22 @@ def _is_valid_retry_after(value: object) -> bool:
         and math.isfinite(value)
         and value > 0
     )
+
+
+def _parse_retry_after_header(value: str | None) -> float | None:
+    if not value:
+        return None
+
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+
+    return seconds if _is_valid_retry_after(seconds) else None
