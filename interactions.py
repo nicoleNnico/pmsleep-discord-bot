@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import random
 import time
@@ -8,6 +7,7 @@ import requests
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from config import DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY
 from discord_security import verify_discord_signature
 from discord_messages import send_channel_message
 from image_commands import (
@@ -18,7 +18,6 @@ from image_commands import (
     build_food_carousel_embed,
     is_command_rate_limited,
 )
-
 
 router = APIRouter()
 
@@ -33,7 +32,7 @@ if (
     or any(not isinstance(post, str) or not post.strip() for post in waste_posts)
 ):
     raise ValueError(
-        f"多邊獸自嘲廢文必須是非空字串清單：{WASTE_POSTS_PATH}"
+        f"porygon_waste_posts.json 必須是非空字串清單：{WASTE_POSTS_PATH}"
     )
 
 
@@ -89,7 +88,7 @@ async def discord_interactions(
             body_bytes,
             signature,
             timestamp,
-            os.environ.get("DISCORD_PUBLIC_KEY"),
+            DISCORD_PUBLIC_KEY,
         ):
             log_step("pending", "簽章無效；拒絕請求")
             raise HTTPException(status_code=401, detail="Invalid request signature")
@@ -196,7 +195,7 @@ async def discord_interactions(
                     })
 
                 channel_id = data.get("channel_id")
-                token = os.environ.get("DISCORD_BOT_TOKEN")
+                token = DISCORD_BOT_TOKEN
                 if not isinstance(channel_id, str) or not channel_id.isdecimal():
                     log_step(interaction_id, "/echo 缺少有效頻道 ID")
                     return JSONResponse({

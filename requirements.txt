@@ -3,4 +3,3 @@ uvicorn
 pillow
 pynacl
 requests
-python-dotenv

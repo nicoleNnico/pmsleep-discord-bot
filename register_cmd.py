@@ -1,17 +1,12 @@
-import os
 import json
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
+
+from config import DISCORD_APP_ID, DISCORD_BOT_TOKEN
 
 # Discord 斜線指令（Slash Command）需要透過 Discord API 發送一個 HTTP POST 請求，該指令才會被註冊。
 # 這個檔案只需要在你的電腦本機執行一次即可。
-
-load_dotenv(Path(__file__).resolve().with_name(".env"))
-
-DISCORD_APP_ID = os.getenv("DISCORD_APP_ID")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 if not DISCORD_APP_ID or not DISCORD_BOT_TOKEN:
     raise RuntimeError("請在專案根目錄的 .env 設定 DISCORD_APP_ID 和 DISCORD_BOT_TOKEN")
@@ -41,7 +36,7 @@ commands = [
     ),
     {
         "name": "廢文",
-        "description": "看看多邊獸今天又準備了什麼自嘲廢文",
+        "description": "看看多邊獸今天會發什麼廢文",
     },
     {
         "name": "echo",
