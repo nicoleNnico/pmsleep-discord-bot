@@ -44,6 +44,21 @@ commands = [
         "default_member_permissions": "8",
     },
     {
+        "name": "clean",
+        "description": "清理頻道最新訊息（需管理員確認）",
+        "default_member_permissions": "8",
+        "options": [
+            {
+                "name": "message_count",
+                "description": "要清理的最新訊息數量（1 到 100）",
+                "type": 4,  # INTEGER 類型
+                "required": True,
+                "min_value": 1,
+                "max_value": 100,
+            }
+        ],
+    },
+    {
         "name": "echo",
         "description": "讓機器人獨立發送指定文字",
         "default_member_permissions": "8",

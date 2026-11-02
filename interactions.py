@@ -6,11 +6,13 @@ import time
 
 import requests
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from config import DISCORD_APP_ID, DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY
 from discord_security import verify_discord_signature
 from discord_messages import (
+    OldMessagesError,
+    clean_recent_messages,
     delete_original_interaction_response,
     edit_original_interaction_response,
     send_channel_message,
@@ -45,6 +47,84 @@ if (
 
 def log_step(interaction_id: str, message: str) -> None:
     print(f"[interaction_id={interaction_id}] {message}", flush=True)
+
+
+def has_administrator_permission(interaction_data: dict) -> bool:
+    member = interaction_data.get("member") or {}
+    member_permissions = member.get("permissions")
+    try:
+        return (
+            member_permissions is not None
+            and (int(member_permissions) & 8) == 8
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+async def execute_clean_messages(
+    interaction_id: str,
+    application_id: str,
+    interaction_token: str,
+    channel_id: str,
+    count: int,
+) -> None:
+    try:
+        deleted_count = await asyncio.to_thread(
+            clean_recent_messages,
+            DISCORD_BOT_TOKEN,
+            channel_id,
+            count,
+        )
+        result_message = f"✅ 已清理 {deleted_count} 則訊息。"
+        log_step(
+            interaction_id,
+            f"/clean 清理完成；deleted_count={deleted_count}",
+        )
+    except OldMessagesError as error:
+        result_message = f"❌ {error}"
+        log_step(interaction_id, f"/clean 拒絕清理；reason={error}")
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        response = error.response if isinstance(error, requests.HTTPError) else None
+        discord_code = None
+        discord_message = None
+        if response is not None:
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = None
+            if isinstance(error_body, dict):
+                discord_code = error_body.get("code")
+                discord_message = error_body.get("message")
+        status = response.status_code if response is not None else "unknown"
+        log_step(
+            interaction_id,
+            "/clean 清理失敗；"
+            f"error_type={type(error).__name__} status={status} "
+            f"discord_code={discord_code!r} "
+            f"discord_message={discord_message!r}",
+        )
+        if response is not None and response.status_code == 403:
+            result_message = "❌ Bot 缺少查看訊息歷史或管理訊息的權限。"
+        elif response is not None and response.status_code == 429:
+            result_message = "❌ Discord 暫時限制了 Bot 的 API 請求，請稍後再試。"
+        else:
+            result_message = "❌ 清理失敗，請檢查 Bot 權限或稍後再試。"
+
+    try:
+        await asyncio.to_thread(
+            edit_original_interaction_response,
+            application_id,
+            interaction_token,
+            result_message,
+        )
+    except requests.RequestException as error:
+        response = error.response
+        log_step(
+            interaction_id,
+            "/clean 結果回覆更新失敗；"
+            f"error_type={type(error).__name__} "
+            f"status={response.status_code if response is not None else 'unknown'}",
+        )
 
 
 async def delete_echo_confirmation(
@@ -145,6 +225,11 @@ def home():
     return {"status": "ok", "message": "Discord Webhook Bot is running!"}
 
 
+@router.head("/")
+def home_head():
+    return Response(status_code=200)
+
+
 @router.post("/interactions")
 async def discord_interactions(
     request: Request,
@@ -190,6 +275,85 @@ async def discord_interactions(
 
         if interaction_type == 3:
             custom_id = data.get("data", {}).get("custom_id", "")
+            if custom_id.startswith("clean:"):
+                parts = custom_id.split(":")
+                if len(parts) != 4 or parts[1] not in {"confirm", "cancel"}:
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 這個清理按鈕無效或已過期。",
+                            "flags": 64,
+                        },
+                    })
+
+                _, action, requester_id, raw_count = parts
+                try:
+                    count = int(raw_count)
+                except ValueError:
+                    count = 0
+                member = data.get("member") or {}
+                user = member.get("user") or data.get("user") or {}
+                if (
+                    not 1 <= count <= 100
+                    or not requester_id.isdecimal()
+                    or user.get("id") != requester_id
+                ):
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 只有發起清理的管理員可以操作這個按鈕。",
+                            "flags": 64,
+                        },
+                    })
+                if not has_administrator_permission(data):
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 只有管理員可以操作清理按鈕。",
+                            "flags": 64,
+                        },
+                    })
+
+                if action == "cancel":
+                    return JSONResponse({
+                        "type": 7,
+                        "data": {
+                            "content": "已取消清理。",
+                            "components": [],
+                        },
+                    })
+
+                channel_id = data.get("channel_id")
+                interaction_token = data.get("token")
+                if (
+                    not isinstance(channel_id, str)
+                    or not channel_id.isdecimal()
+                    or not isinstance(interaction_token, str)
+                    or not interaction_token
+                    or not DISCORD_APP_ID
+                    or not DISCORD_BOT_TOKEN
+                ):
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 清理功能設定不完整，請通知 Bot 管理員。",
+                            "flags": 64,
+                        },
+                    })
+
+                background_tasks.add_task(
+                    execute_clean_messages,
+                    interaction_id,
+                    DISCORD_APP_ID,
+                    interaction_token,
+                    channel_id,
+                    count,
+                )
+                return JSONResponse({
+                    "type": 5,
+                    "data": {"flags": 64},
+                })
+
             if custom_id.startswith("food_carousel:"):
                 try:
                     index = int(custom_id.partition(":")[2])
@@ -231,6 +395,86 @@ async def discord_interactions(
                 interaction_id,
                 f"進入 Slash Command 分支；command={command_name}",
             )
+
+            if command_name == "clean":
+                if not has_administrator_permission(data):
+                    log_step(
+                        interaction_id,
+                        "拒絕 /clean；使用者沒有管理員權限",
+                    )
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 只有管理員可以使用這個指令。",
+                            "flags": 64,
+                        },
+                    })
+
+                options = data["data"].get("options", [])
+                message_count = next(
+                    (
+                        option.get("value")
+                        for option in options
+                        if option.get("name") == "message_count"
+                    ),
+                    None,
+                )
+                if (
+                    not isinstance(message_count, int)
+                    or isinstance(message_count, bool)
+                    or not 1 <= message_count <= 100
+                ):
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 清理數量必須是 1 到 100 的整數。",
+                            "flags": 64,
+                        },
+                    })
+
+                member = data.get("member") or {}
+                user = member.get("user") or data.get("user") or {}
+                requester_id = user.get("id")
+                if not isinstance(requester_id, str) or not requester_id.isdecimal():
+                    return JSONResponse({
+                        "type": 4,
+                        "data": {
+                            "content": "❌ 找不到發起清理的管理員資訊。",
+                            "flags": 64,
+                        },
+                    })
+
+                return JSONResponse({
+                    "type": 4,
+                    "data": {
+                        "content": (
+                            f"⚠️ 確定要刪除這個頻道最新的 "
+                            f"{message_count} 則訊息嗎？超過 14 天的訊息無法批次刪除。"
+                        ),
+                        "flags": 64,
+                        "components": [{
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "style": 4,
+                                    "label": "確認刪除",
+                                    "custom_id": (
+                                        f"clean:confirm:{requester_id}:{message_count}"
+                                    ),
+                                },
+                                {
+                                    "type": 2,
+                                    "style": 2,
+                                    "label": "取消",
+                                    "custom_id": (
+                                        f"clean:cancel:{requester_id}:{message_count}"
+                                    ),
+                                },
+                            ],
+                        }],
+                    },
+                })
 
             if command_name == "live":
                 member = data.get("member") or {}
@@ -368,7 +612,7 @@ async def discord_interactions(
                 return JSONResponse({
                     "type": 4,
                     "data": {
-                        "content": "收到，機器人會另外發一則訊息；此訊息 3 秒後自動刪除。",
+                        "content": "機器人即將發送指定訊息，請稍候。",
                         "flags": 64,
                     },
                 })

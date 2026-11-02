@@ -1,13 +1,16 @@
 import logging
 import math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 import requests
 
 
 DISCORD_API_URL = "https://discord.com/api/v10"
+DISCORD_EPOCH_MILLISECONDS = 1420070400000
+MESSAGE_BULK_DELETE_MAX_AGE = timedelta(days=14)
+MAX_RATE_LIMIT_RETRIES = 3
 logger = logging.getLogger(__name__)
 
 
@@ -19,6 +22,7 @@ def send_channel_message(token: str, channel_id: str, content: str) -> None:
         "allowed_mentions": {"parse": []},
     }
 
+    retry_count = 0
     while True:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
         if response.status_code != 429:
@@ -53,7 +57,20 @@ def send_channel_message(token: str, channel_id: str, content: str) -> None:
                     f"retry_after_header_present={bool(retry_after_header)}"
                 )
 
-        logger.warning("Discord API rate limit；等待 %.2f 秒後重試", retry_after)
+        if retry_count >= MAX_RATE_LIMIT_RETRIES:
+            logger.error(
+                "Discord API rate limit；已達最大重試次數=%s",
+                MAX_RATE_LIMIT_RETRIES,
+            )
+            response.raise_for_status()
+
+        retry_count += 1
+        logger.warning(
+            "Discord API rate limit；等待 %.2f 秒後重試；retry=%s/%s",
+            retry_after,
+            retry_count,
+            MAX_RATE_LIMIT_RETRIES,
+        )
         time.sleep(retry_after)
 
 
@@ -83,6 +100,63 @@ def edit_original_interaction_response(
     )
     response = requests.patch(url, json={"content": content}, timeout=15)
     response.raise_for_status()
+
+
+class OldMessagesError(ValueError):
+    pass
+
+
+def clean_recent_messages(token: str, channel_id: str, count: int) -> int:
+    if not 1 <= count <= 100:
+        raise ValueError("清理數量必須介於 1 到 100。")
+
+    headers = {"Authorization": f"Bot {token}"}
+    messages_response = requests.get(
+        f"{DISCORD_API_URL}/channels/{channel_id}/messages",
+        headers=headers,
+        params={"limit": count},
+        timeout=15,
+    )
+    messages_response.raise_for_status()
+    messages = messages_response.json()
+    if not isinstance(messages, list):
+        raise RuntimeError("Discord 回傳非預期的訊息清單。")
+    if not messages:
+        return 0
+
+    message_ids = []
+    cutoff = datetime.now(timezone.utc) - MESSAGE_BULK_DELETE_MAX_AGE
+    for message in messages:
+        message_id = message.get("id") if isinstance(message, dict) else None
+        if not isinstance(message_id, str) or not message_id.isdecimal():
+            raise RuntimeError("Discord 回傳含有無效的訊息 ID。")
+
+        created_at = datetime.fromtimestamp(
+            (int(message_id) >> 22) / 1000
+            + DISCORD_EPOCH_MILLISECONDS / 1000,
+            timezone.utc,
+        )
+        if created_at < cutoff:
+            raise OldMessagesError(
+                "最新訊息範圍內包含超過 14 天的訊息，為避免部分刪除，本次未刪除。"
+            )
+        message_ids.append(message_id)
+
+    if len(message_ids) == 1:
+        delete_response = requests.delete(
+            f"{DISCORD_API_URL}/channels/{channel_id}/messages/{message_ids[0]}",
+            headers=headers,
+            timeout=15,
+        )
+    else:
+        delete_response = requests.post(
+            f"{DISCORD_API_URL}/channels/{channel_id}/messages/bulk-delete",
+            headers=headers,
+            json={"messages": message_ids},
+            timeout=15,
+        )
+    delete_response.raise_for_status()
+    return len(message_ids)
 
 
 def _is_valid_retry_after(value: object) -> bool:
