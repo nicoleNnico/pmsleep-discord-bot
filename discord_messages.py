@@ -57,6 +57,7 @@ def send_interaction_followup_message(
     )
     response = requests.post(
         url,
+        params={"wait": "true"},
         json={
             "content": content,
             "allowed_mentions": {"parse": []},

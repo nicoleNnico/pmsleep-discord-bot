@@ -208,6 +208,12 @@ def send_echo_message(
                 f"error_type={type(edit_error).__name__}",
             )
         return
+    except requests.Timeout:
+        log_step(
+            interaction_id,
+            "/echo follow-up 發送逾時；Discord 是否已建立訊息無法確認，未自動重試",
+        )
+        return
     except (requests.RequestException, RuntimeError) as error:
         log_step(
             interaction_id,
