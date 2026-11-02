@@ -8,10 +8,46 @@ import requests
 
 
 DISCORD_API_URL = "https://discord.com/api/v10"
-DISCORD_EPOCH_MILLISECONDS = 1420070400000
+DISCORD_EPOCH_MILLISECONDS = 1420070400000  # Discord Snowflake ID 的時間基準：1420070400000 代表 2015-01-01 00:00:00 UTC 的毫秒時間戳。
 MESSAGE_BULK_DELETE_MAX_AGE = timedelta(days=14)
-MAX_RATE_LIMIT_RETRIES = 3
+MAX_RATE_LIMIT_RETRIES = 1  # 設重試次數上限，避免無限重試造成 rate limit。
 logger = logging.getLogger(__name__)
+
+
+def _log_rate_limit_response(response: requests.Response, operation: str) -> None:
+    try:
+        response_body = response.json()
+    except ValueError:
+        response_body = None
+
+    body_retry_after = (
+        response_body.get("retry_after")
+        if isinstance(response_body, dict)
+        else None
+    )
+    body_global = (
+        response_body.get("global")
+        if isinstance(response_body, dict)
+        else None
+    )
+    headers = response.headers
+    logger.warning(
+        "Discord API rate limit response；operation=%s status=%s "
+        "retry_after_body=%r retry_after_header=%r "
+        "global_body=%r global_header=%r scope=%r "
+        "limit=%r remaining=%r reset_after=%r bucket=%r",
+        operation,
+        response.status_code,
+        body_retry_after,
+        headers.get("Retry-After"),
+        body_global,
+        headers.get("X-RateLimit-Global"),
+        headers.get("X-RateLimit-Scope"),
+        headers.get("X-RateLimit-Limit"),
+        headers.get("X-RateLimit-Remaining"),
+        headers.get("X-RateLimit-Reset-After"),
+        headers.get("X-RateLimit-Bucket"),
+    )
 
 
 def send_channel_message(token: str, channel_id: str, content: str) -> None:
@@ -28,6 +64,7 @@ def send_channel_message(token: str, channel_id: str, content: str) -> None:
         if response.status_code != 429:
             response.raise_for_status()
             return
+        _log_rate_limit_response(response, "send_channel_message")
 
         try:
             response_body = response.json()
@@ -83,6 +120,8 @@ def delete_original_interaction_response(
         f"{interaction_token}/messages/@original"
     )
     response = requests.delete(url, timeout=15)
+    if response.status_code == 429:
+        _log_rate_limit_response(response, "delete_original_interaction_response")
     if response.status_code == 404:
         logger.info("原始互動回覆已不存在；略過自動刪除")
         return
@@ -99,6 +138,8 @@ def edit_original_interaction_response(
         f"{interaction_token}/messages/@original"
     )
     response = requests.patch(url, json={"content": content}, timeout=15)
+    if response.status_code == 429:
+        _log_rate_limit_response(response, "edit_original_interaction_response")
     response.raise_for_status()
 
 
@@ -117,6 +158,8 @@ def clean_recent_messages(token: str, channel_id: str, count: int) -> int:
         params={"limit": count},
         timeout=15,
     )
+    if messages_response.status_code == 429:
+        _log_rate_limit_response(messages_response, "clean_get_messages")
     messages_response.raise_for_status()
     messages = messages_response.json()
     if not isinstance(messages, list):
@@ -155,6 +198,8 @@ def clean_recent_messages(token: str, channel_id: str, count: int) -> int:
             json={"messages": message_ids},
             timeout=15,
         )
+    if delete_response.status_code == 429:
+        _log_rate_limit_response(delete_response, "clean_delete_messages")
     delete_response.raise_for_status()
     return len(message_ids)
 
