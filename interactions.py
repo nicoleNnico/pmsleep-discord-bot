@@ -15,7 +15,7 @@ from discord_messages import (
     clean_recent_messages,
     delete_original_interaction_response,
     edit_original_interaction_response,
-    send_channel_message,
+    send_interaction_followup_message,
 )
 from image_commands import (
     FOOD_CAROUSEL,
@@ -165,13 +165,16 @@ async def delete_echo_confirmation(
 
 def send_echo_message(
     interaction_id: str,
-    token: str,
-    channel_id: str,
+    application_id: str,
     content: str,
     interaction_token: str,
 ) -> None:
     try:
-        send_channel_message(token, channel_id, content)
+        send_interaction_followup_message(
+            application_id,
+            interaction_token,
+            content,
+        )
     except requests.HTTPError as error:
         response = error.response
         discord_code = None
@@ -191,11 +194,7 @@ def send_echo_message(
             f"discord_code={discord_code!r} "
             f"discord_message={discord_message!r}",
         )
-        failure_message = (
-            "❌ 機器人無法在這個頻道發送訊息，請確認頻道權限。"
-            if response is not None and response.status_code == 403
-            else "❌ 機器人發送訊息失敗，請稍後再試。"
-        )
+        failure_message = "❌ 機器人發送訊息失敗，請稍後再試。"
         try:
             edit_original_interaction_response(
                 DISCORD_APP_ID,
@@ -549,34 +548,13 @@ async def discord_interactions(
                         },
                     })
 
-                channel_id = data.get("channel_id")
-                token = DISCORD_BOT_TOKEN
-                if not isinstance(channel_id, str) or not channel_id.isdecimal():
-                    log_step(interaction_id, "/echo 缺少有效頻道 ID")
-                    return JSONResponse({
-                        "type": 4,
-                        "data": {
-                            "content": "❌ 找不到要發送的頻道。",
-                            "flags": 64,
-                        },
-                    })
-                if not token:
-                    log_step(interaction_id, "/echo 缺少 DISCORD_BOT_TOKEN")
-                    return JSONResponse({
-                        "type": 4,
-                        "data": {
-                            "content": "❌ 機器人的獨立發送功能尚未設定。",
-                            "flags": 64,
-                        },
-                    })
-
                 interaction_token = data.get("token")
                 if not isinstance(interaction_token, str) or not interaction_token:
-                    log_step(interaction_id, "/echo 缺少互動 token")
+                    log_step(interaction_id, "/echo 缺少 follow-up 所需的互動 token")
                     return JSONResponse({
                         "type": 4,
                         "data": {
-                            "content": "❌ 找不到刪除確認訊息所需的互動資訊。",
+                            "content": "❌ 找不到發送訊息所需的互動資訊。",
                             "flags": 64,
                         },
                     })
@@ -585,7 +563,7 @@ async def discord_interactions(
                     return JSONResponse({
                         "type": 4,
                         "data": {
-                            "content": "❌ 確認訊息自動刪除功能尚未設定。",
+                            "content": "❌ 機器人的訊息發送功能尚未設定。",
                             "flags": 64,
                         },
                     })
@@ -603,12 +581,11 @@ async def discord_interactions(
                 background_tasks.add_task(
                     send_echo_message,
                     interaction_id,
-                    token,
-                    channel_id,
+                    DISCORD_APP_ID,
                     echo_text,
                     interaction_token,
                 )
-                log_step(interaction_id, f"/echo 排入獨立訊息；length={len(echo_text)}")
+                log_step(interaction_id, f"/echo 排入 follow-up 訊息；length={len(echo_text)}")
                 return JSONResponse({
                     "type": 4,
                     "data": {
